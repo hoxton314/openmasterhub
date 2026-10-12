@@ -1,8 +1,13 @@
 # Releasing
 
-Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed, and go to the
-AUR as [`openmasterhub-bin`](https://aur.archlinux.org/packages/openmasterhub-bin) only after a
-manual approval.
+Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed:
+
+- **Linux:** a tarball, published to the AUR as
+  [`openmasterhub-bin`](https://aur.archlinux.org/packages/openmasterhub-bin)
+- **Windows:** an NSIS installer (`OpenMasterHUB_<ver>_x64-setup.exe`) with the app and the bundled
+  service. It installs per user, starts the service at login and asks for no admin rights.
+
+Nothing is published before a manual approval.
 
 ## Cutting a release
 
@@ -18,6 +23,8 @@ manual approval.
    - It builds the release binaries and stages `openmasterhub-<ver>-x86_64.tar.gz`.
    - It renders the AUR `PKGBUILD` with the real sha256 and **builds the package with makepkg**.
    - It uploads the tarball to a **draft** GitHub release.
+   In parallel, the **windows** job builds the service and the app on `windows-latest` and uploads
+   the installer to the same draft (`.github/workflows/build-windows.yml`).
 4. Check the draft release, then open the workflow run in *Actions*. The **publish** job waits
    for approval of the `aur` environment, so click **Review deployments → Approve**. It then:
    - publishes the GitHub release
@@ -49,3 +56,9 @@ cargo build --release
 .github/scripts/stage-release.sh 0.1.0 target /tmp/release
 .github/scripts/test-pkgbuild.sh /tmp/release 0.1.0
 ```
+
+## Windows installer without a release
+
+Run **Actions → Build Windows installer → Run workflow** (also runs on pull requests that
+touch the app or the service) and download the `windows-installer` artifact. The installer is
+not code-signed yet, so SmartScreen warns on first run (*More info → Run anyway*).

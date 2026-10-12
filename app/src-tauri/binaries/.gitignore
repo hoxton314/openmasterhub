@@ -1,0 +1,3 @@
+# Sidecar binaries are copied here by CI before `tauri build` (masterhubd-<target-triple>[.exe]).
+*
+!.gitignore

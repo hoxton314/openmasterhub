@@ -40,3 +40,39 @@ jobs:
 
       - name: Tests
         run: cargo test --locked
+
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Frontend
+        working-directory: app
+        run: |
+          npm ci
+          npm run build
+
+      # tauri-build checks that the sidecar exists; the real one is only needed for bundling.
+      - name: Placeholder sidecar
+        shell: bash
+        run: |
+          touch "app/src-tauri/binaries/masterhubd-$(rustc -vV | sed -n 's/^host: //p').exe"
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked
