@@ -1,0 +1,12 @@
+{
+  "bundle": {
+    "targets": ["nsis"],
+    "externalBin": ["binaries/masterhubd"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "windows/hooks.nsh"
+      }
+    }
+  }
+}

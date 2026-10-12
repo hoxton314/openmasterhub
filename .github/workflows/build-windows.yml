@@ -1,0 +1,56 @@
+name: Build Windows installer
+
+# Builds the Windows installer (NSIS): the Tauri app with masterhubd bundled as a sidecar.
+# Called by release.yml; can also be run by hand (Actions → Build Windows installer) to get an
+# installer artifact for testing without releasing.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'crates/**'
+      - 'Cargo.*'
+      - '.github/workflows/build-windows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Build the service
+        run: cargo build --release --locked -p masterhubd
+
+      # Tauri bundles sidecars named <name>-<target-triple>.exe from app/src-tauri/binaries.
+      - name: Stage the service as the app's sidecar
+        shell: bash
+        run: |
+          cp target/release/masterhubd.exe "app/src-tauri/binaries/masterhubd-$(rustc -vV | sed -n 's/^host: //p').exe"
+
+      - name: Build the app and installer
+        working-directory: app
+        run: |
+          npm ci
+          npx tauri build --bundles nsis -- --locked
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error

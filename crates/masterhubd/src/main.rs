@@ -1,4 +1,7 @@
-//! masterhubd: Linux service for the Cooler Master MasterHUB.
+//! masterhubd: background service for the Cooler Master MasterHUB.
+
+// On Windows the service starts at login; as a GUI-subsystem program it opens no console window.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod actions;
 mod controller;
@@ -31,7 +34,7 @@ const USAGE: &str = "usage: masterhubd [--config PATH] [--check] [--list]
 Logging: RUST_LOG=debug masterhubd";
 
 fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    init_logging();
 
     let mut config_path = None;
     let (mut check, mut list) = (false, false);
@@ -119,4 +122,25 @@ fn main() -> Result<()> {
         let _ = h.join();
     }
     Ok(())
+}
+
+/// Log to stderr, or on Windows without a console (started at login) to
+/// `%LOCALAPPDATA%\openmasterhub\masterhubd.log`.
+fn init_logging() {
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+        // SAFETY: plain Win32 call. Succeeds when started from a terminal, so `--list` and the
+        // log are visible there.
+        let has_console = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } != 0 || cfg!(debug_assertions);
+        if !has_console
+            && let Some(dir) = std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("openmasterhub"))
+            && std::fs::create_dir_all(&dir).is_ok()
+            && let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("masterhubd.log"))
+        {
+            builder.target(env_logger::Target::Pipe(Box::new(file)));
+        }
+    }
+    builder.init();
 }

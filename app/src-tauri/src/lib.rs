@@ -125,8 +125,36 @@ fn open_window_classes() -> Vec<String> {
 
 #[tauri::command]
 fn start_service() -> Result<(), String> {
-    let ok = std::process::Command::new("systemctl").args(["--user", "start", "masterhubd"]).status().is_ok_and(|s| s.success());
-    if ok { Ok(()) } else { Err("Could not start masterhubd.service; run masterhubd in a terminal instead.".into()) }
+    launch_service().map_err(err)
+}
+
+/// Start masterhubd: through systemd on Linux, or the service bundled next to the app
+/// elsewhere (detached, so it keeps running when the app closes).
+fn launch_service() -> anyhow::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let ok = std::process::Command::new("systemctl").args(["--user", "start", "masterhubd"]).status().is_ok_and(|s| s.success());
+        anyhow::ensure!(ok, "could not start masterhubd.service; run masterhubd in a terminal instead");
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let exe = std::env::current_exe()?;
+        let name = if cfg!(windows) { "masterhubd.exe" } else { "masterhubd" };
+        let service = exe.parent().map(|d| d.join(name)).filter(|p| p.exists());
+        let service = service.ok_or_else(|| anyhow::anyhow!("masterhubd is not installed next to the app"))?;
+        let mut cmd = std::process::Command::new(service);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const DETACHED_PROCESS: u32 = 0x0000_0008;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+        }
+        cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()?;
+        Ok(())
+    }
 }
 
 impl From<DisplayImage> for Display {
@@ -191,6 +219,20 @@ pub fn run() {
         .manage(AppState { client, renderer: Renderer::new(None), last_sent: Mutex::new(None) })
         .setup(move |app| {
             forward_events(app.handle().clone(), rx);
+            // Windows/macOS: the service is bundled with the app; start it if it isn't running
+            // (on Linux systemd starts it).
+            #[cfg(not(target_os = "linux"))]
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                    if !handle.state::<AppState>().client.is_online()
+                        && let Err(e) = launch_service()
+                    {
+                        log::warn!("starting masterhubd: {e:#}");
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
