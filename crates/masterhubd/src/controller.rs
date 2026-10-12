@@ -175,7 +175,8 @@ impl Controller {
                 }
             }
             Msg::Input { serial, report } => self.input(&serial, report),
-            Msg::ActiveApp(class) if class == GUI_APP_ID => {}
+            // The GUI's own window: GTK uses the app ID, Tauri the binary name (openmasterhub[.exe]).
+            Msg::ActiveApp(class) if class == GUI_APP_ID || class.to_ascii_lowercase().starts_with("openmasterhub") => {}
             Msg::ActiveApp(class) => {
                 let target = self.config.profile_for_app(&class);
                 self.active_app = Some(class);
@@ -650,15 +651,12 @@ impl Controller {
             .modules
             .values()
             .find(|m| m.info.kind == ModuleKind::Base)
-            .and_then(|m| layout::ports_from_sysfs(m.info.usb_name.as_deref()?));
+            .and_then(|m| m.info.usb_ports.clone());
         let modules: Vec<ModuleState> = self
             .modules
             .values()
             .map(|m| {
-                let socket = base_ports.as_ref().and_then(|base| {
-                    let ports = layout::ports_from_sysfs(m.info.usb_name.as_deref()?)?;
-                    layout::socket(&ports, base)
-                });
+                let socket = base_ports.as_ref().and_then(|base| layout::socket(m.info.usb_ports.as_deref()?, base));
                 let placement = socket.as_deref().and_then(|s| layout::place(m.info.kind, s));
                 ModuleState {
                     kind: m.info.kind.name().to_owned(),

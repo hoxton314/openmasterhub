@@ -9,14 +9,29 @@ license.workspace = true
 anyhow = "1.0.104"
 ctrlc = { version = "3.5.2", features = ["termination"] }
 env_logger = "0.11.11"
-evdev = "0.13.2"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif"] }
 jiff = "0.2.38"
-libc = "0.2.190"
 log = "0.4.34"
-masterhub-core = { version = "0.1.0", path = "../masterhub-core" }
+masterhub-core = { path = "../masterhub-core" }
 masterhub-proto = { path = "../masterhub-proto" }
 nvml-wrapper = "0.13.0"
 serde = "1.0.229"
 serde_json = "1.0.154"
 zbus = "5.19.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = "0.13.2"
+libc = "0.2.190"
+
+[target.'cfg(windows)'.dependencies]
+hidapi = { version = "2.6.7", default-features = false, features = ["windows-native"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Devices_Properties",
+    "Win32_System_ProcessStatus",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

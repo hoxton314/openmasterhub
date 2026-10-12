@@ -29,7 +29,7 @@ jobs:
 
     steps:
       - name: Install build dependencies
-        run: pacman -Syu --noconfirm --needed git rust gtk4 libadwaita pkgconf github-cli
+        run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 gtk3 pkgconf github-cli
 
       - uses: actions/checkout@v4
 
@@ -44,6 +44,14 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # The Tauri crate embeds the built frontend, so it has to exist before any cargo step.
+      - name: Frontend
+        working-directory: app
+        run: |
+          npm ci
+          npm run check
+          npm run build
+
       - uses: swatinem/rust-cache@v2
 
       - name: Clippy
@@ -53,7 +61,10 @@ jobs:
         run: cargo test --locked
 
       - name: Build
-        run: cargo build --release --locked
+        run: |
+          cargo build --release --locked -p masterhubd
+          # `tauri build` (not plain cargo) so the UI is embedded instead of loaded from the dev server.
+          (cd app && npx tauri build --no-bundle -- --locked)
 
       # makepkg refuses to run as root, which the container is.
       - name: Stage release and test the AUR package

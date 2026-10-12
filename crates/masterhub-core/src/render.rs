@@ -256,6 +256,13 @@ fn blend_over(dst: &mut RgbImage, src: &RgbaImage, x0: u32, y0: u32, opacity: f3
     }
 }
 
+#[cfg(windows)]
+fn find_default_font() -> Option<PathBuf> {
+    let fonts = PathBuf::from(std::env::var_os("WINDIR")?).join("Fonts");
+    ["segoeuib.ttf", "arialbd.ttf", "segoeui.ttf"].into_iter().map(|f| fonts.join(f)).find(|p| p.exists())
+}
+
+#[cfg(not(windows))]
 fn find_default_font() -> Option<PathBuf> {
     let out = std::process::Command::new("fc-match").args(["-f", "%{file}", "sans:bold"]).output().ok()?;
     let p = PathBuf::from(String::from_utf8(out.stdout).ok()?.trim());

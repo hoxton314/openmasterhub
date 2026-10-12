@@ -2,16 +2,15 @@
 
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
-use std::str::FromStr;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Result, anyhow, bail};
-use evdev::uinput::VirtualDevice;
-use evdev::{AttributeSet, KeyCode, KeyEvent};
+use anyhow::Result;
 
 use masterhub_core::config::Action;
+
+use crate::keyboard::Keyboard;
 
 pub struct Request {
     pub action: Action,
@@ -29,7 +28,7 @@ pub fn spawn() -> Sender<Request> {
 }
 
 fn run(rx: Receiver<Request>) {
-    let mut keyboard: Option<VirtualDevice> = None;
+    let mut keyboard = Keyboard::new();
     let mut running: HashMap<String, Child> = HashMap::new();
     let mut pending: HashMap<String, String> = HashMap::new();
     let mut detached: Vec<Child> = Vec::new();
@@ -38,7 +37,7 @@ fn run(rx: Receiver<Request>) {
         match rx.recv_timeout(Duration::from_millis(20)) {
             Ok(req) => match req.action {
                 Action::Keys(combo) => {
-                    if let Err(e) = send_keys(&mut keyboard, &combo) {
+                    if let Err(e) = keyboard.send(&combo) {
                         log::error!("keys {combo:?}: {e:#}");
                     }
                 }
@@ -75,7 +74,7 @@ fn run(rx: Receiver<Request>) {
 
 fn spawn_shell(cmd: &str) -> Option<Child> {
     log::debug!("run: {cmd}");
-    match Command::new("sh").args(["-c", cmd]).stdin(Stdio::null()).spawn() {
+    match shell(cmd).stdin(Stdio::null()).spawn() {
         Ok(c) => Some(c),
         Err(e) => {
             log::error!("spawning {cmd:?}: {e}");
@@ -84,81 +83,28 @@ fn spawn_shell(cmd: &str) -> Option<Child> {
     }
 }
 
-fn send_keys(keyboard: &mut Option<VirtualDevice>, combo: &str) -> Result<()> {
-    let keys = parse_combo(combo)?;
-    if keyboard.is_none() {
-        *keyboard = Some(create_keyboard()?);
+/// `sh -c` on Unix, `cmd /C` without a console window on Windows.
+fn shell(cmd: &str) -> Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut c = Command::new("cmd");
+        c.arg("/C").raw_arg(cmd).creation_flags(CREATE_NO_WINDOW);
+        c
     }
-    let kb = keyboard.as_mut().expect("keyboard just created");
-    for k in &keys {
-        kb.emit(&[*KeyEvent::new(*k, 1)])?;
+    #[cfg(not(windows))]
+    {
+        let mut c = Command::new("sh");
+        c.args(["-c", cmd]);
+        c
     }
-    for k in keys.iter().rev() {
-        kb.emit(&[*KeyEvent::new(*k, 0)])?;
-    }
-    Ok(())
-}
-
-fn create_keyboard() -> Result<VirtualDevice> {
-    let mut keys = AttributeSet::<KeyCode>::new();
-    // KEY_ESC .. KEY_MICMUTE covers the keyboard and media keys.
-    for code in 1..=248 {
-        keys.insert(KeyCode::new(code));
-    }
-    let dev = VirtualDevice::builder()?.name("openmasterhub virtual keyboard").with_keys(&keys)?.build()?;
-    // Give the compositor a moment to pick up the new device before the first key.
-    thread::sleep(Duration::from_millis(200));
-    Ok(dev)
-}
-
-/// `"ctrl+shift+m"` -> [KEY_LEFTCTRL, KEY_LEFTSHIFT, KEY_M]
-pub fn parse_combo(combo: &str) -> Result<Vec<KeyCode>> {
-    let keys = combo
-        .split('+')
-        .map(|part| {
-            let name = part.trim().to_ascii_lowercase();
-            let canonical = match name.as_str() {
-                "ctrl" | "control" => "leftctrl",
-                "shift" => "leftshift",
-                "alt" => "leftalt",
-                "altgr" => "rightalt",
-                "super" | "meta" | "win" | "cmd" => "leftmeta",
-                "return" => "enter",
-                "del" => "delete",
-                "pgup" => "pageup",
-                "pgdn" => "pagedown",
-                other => other,
-            };
-            KeyCode::from_str(&format!("KEY_{}", canonical.to_ascii_uppercase()))
-                .map_err(|_| anyhow!("unknown key {part:?} in {combo:?}"))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    if keys.is_empty() {
-        bail!("empty key combination");
-    }
-    Ok(keys)
 }
 
 /// Check all key names in the config up front, so typos are reported at startup.
 pub fn validate(action: &Action) -> Result<()> {
     match action {
-        Action::Keys(k) => parse_combo(k).map(|_| ()),
+        Action::Keys(k) => crate::keyboard::validate(k),
         _ => Ok(()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn combos() {
-        assert_eq!(
-            parse_combo("ctrl+Shift+m").unwrap(),
-            vec![KeyCode::KEY_LEFTCTRL, KeyCode::KEY_LEFTSHIFT, KeyCode::KEY_M]
-        );
-        assert_eq!(parse_combo("playpause").unwrap(), vec![KeyCode::KEY_PLAYPAUSE]);
-        assert_eq!(parse_combo("super+f13").unwrap(), vec![KeyCode::KEY_LEFTMETA, KeyCode::KEY_F13]);
-        assert!(parse_combo("ctrl+nosuchkey").is_err());
     }
 }

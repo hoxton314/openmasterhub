@@ -1,23 +1,16 @@
-//! Minimal Linux hidraw access: discovery via sysfs, reports via read/write/ioctl.
+//! Linux hidraw access: discovery via sysfs, reports via read/write/ioctl.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::fd::AsRawFd;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use masterhub_core::layout::ports_from_sysfs;
 use masterhub_proto::{FEATURE_COMMAND, FEATURE_LEN, FeatureCommand, ModuleKind, VENDOR_ID};
 
-/// A MasterHUB module found in sysfs.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ModuleInfo {
-    pub kind: ModuleKind,
-    pub serial: String,
-    pub devnode: PathBuf,
-    /// USB device name in sysfs, e.g. `3-1.2.2` (bus-ports).
-    pub usb_name: Option<String>,
-}
+use super::ModuleInfo;
 
 /// List all MasterHUB modules currently exposed as hidraw devices.
 pub fn enumerate() -> Vec<ModuleInfo> {
@@ -36,8 +29,8 @@ pub fn enumerate() -> Vec<ModuleInfo> {
             Some(ModuleInfo {
                 kind: ModuleKind::from_pid(pid)?,
                 serial,
-                devnode: Path::new("/dev").join(e.file_name()),
-                usb_name: usb_name(&e.path()),
+                path: Path::new("/dev").join(e.file_name()).display().to_string(),
+                usb_ports: usb_name(&e.path()).and_then(|n| ports_from_sysfs(&n)),
             })
         })
         .collect();
@@ -89,8 +82,8 @@ impl HidDevice {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
-            .open(&info.devnode)
-            .with_context(|| format!("opening {}", info.devnode.display()))?;
+            .open(&info.path)
+            .with_context(|| format!("opening {}", info.path))?;
         Ok(Self { file, info: info.clone() })
     }
 

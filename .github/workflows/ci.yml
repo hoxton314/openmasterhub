@@ -16,15 +16,22 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # Arch: the GUI needs GTK 4.18 / libadwaita 1.7, newer than Ubuntu runners ship, and it
-    # matches what the AUR package is built and used on.
+    # Arch: matches what the AUR package is built and used on.
     container: archlinux:base-devel
 
     steps:
       - name: Install build dependencies
-        run: pacman -Syu --noconfirm --needed git rust gtk4 libadwaita pkgconf
+        run: pacman -Syu --noconfirm --needed git rust nodejs npm webkit2gtk-4.1 gtk3 pkgconf
 
       - uses: actions/checkout@v4
+
+      # The Tauri crate embeds the built frontend, so it has to exist before any cargo step.
+      - name: Frontend
+        working-directory: app
+        run: |
+          npm ci
+          npm run check
+          npm run build
 
       - uses: swatinem/rust-cache@v2
 

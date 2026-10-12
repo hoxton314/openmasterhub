@@ -3,8 +3,9 @@
 mod actions;
 mod controller;
 mod dbus;
+mod focus;
 mod hid;
-mod hyprland;
+mod keyboard;
 mod stats;
 mod worker;
 
@@ -53,7 +54,8 @@ fn main() -> Result<()> {
 
     if list {
         for m in hid::enumerate() {
-            println!("{:<8} {:<22} {:<12} {}", m.kind.name(), m.serial, m.usb_name.as_deref().unwrap_or("?"), m.devnode.display());
+            let ports = m.usb_ports.as_ref().map_or("?".into(), |p| p.iter().map(u8::to_string).collect::<Vec<_>>().join("."));
+            println!("{:<8} {:<22} {:<12} {}", m.kind.name(), m.serial, ports, m.path);
         }
         return Ok(());
     }
@@ -82,6 +84,8 @@ fn main() -> Result<()> {
 
     let (ctl_tx, ctl_rx) = channel();
     let snapshot = Arc::new(Mutex::new(Snapshot::default()));
+    // Windows has no session bus; the GUI link there comes with the cross-platform IPC.
+    let no_dbus = no_dbus || cfg!(windows);
     let bus = if no_dbus {
         None
     } else {
@@ -104,7 +108,7 @@ fn main() -> Result<()> {
             .spawn(move || Controller::new(config, text, path, actions, snapshot, bus).run(ctl_rx))
             .context("spawning controller")?;
     }
-    hyprland::spawn(ctl_tx.clone());
+    focus::spawn(ctl_tx.clone());
 
     log::info!("masterhubd started, config {}", path.display());
     let mut workers: HashMap<String, JoinHandle<()>> = HashMap::new();

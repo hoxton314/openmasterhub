@@ -26,6 +26,15 @@ install -m644 \
   "$root/README.md" \
   "$root/LICENSE" \
   "$out/$name/"
+mkdir -p "$out/$name/icons"
+for size in 32 64 128 256 512; do
+  case $size in
+    256) src=128x128@2x.png ;;
+    512) src=icon.png ;;
+    *) src=${size}x${size}.png ;;
+  esac
+  install -m644 "$root/app/src-tauri/icons/$src" "$out/$name/icons/${size}.png"
+done
 tar -C "$out" -czf "$out/$name.tar.gz" "$name"
 sum=$(sha256sum "$out/$name.tar.gz" | cut -d' ' -f1)
 

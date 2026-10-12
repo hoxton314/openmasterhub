@@ -13,7 +13,7 @@ Supported modules (all verified on hardware): Base, 15-key IPS keypad, 5 faders,
 | `masterhub-proto` | Wire protocol: command encoding and input decoding, no I/O |
 | `masterhub-core` | Config model, Base slot layout, face/widget rendering, D-Bus contract |
 | `masterhubd` | Background service: drives the hardware over hidraw, profiles/pages/folders, live widgets, per-app profiles (Hyprland), D-Bus API |
-| `openmasterhub` | GTK4 + libadwaita app: live picture of your hub, click-to-configure editor |
+| `app/` (`openmasterhub`) | Tauri desktop app (Svelte UI): live picture of your hub, click-to-configure editor |
 
 Protocol documentation: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) and `docs/protocol-*.md`.
 
@@ -38,7 +38,7 @@ sudo udevadm control --reload && sudo udevadm trigger
 
 # Build and install the binaries to ~/.cargo/bin
 cargo install --path crates/masterhubd
-cargo install --path crates/openmasterhub
+(cd app && npm ci && npx tauri build --no-bundle) && install -m755 target/release/openmasterhub ~/.cargo/bin/
 
 # Run the service at login (the unit expects /usr/bin; point it at ~/.cargo/bin)
 mkdir -p ~/.config/systemd/user
@@ -51,6 +51,15 @@ install -Dm644 dist/org.openmasterhub.OpenMasterHub.desktop ~/.local/share/appli
 
 Virtual key presses use `/dev/uinput`, which the logged-in user can normally access. Volume
 widgets use `wpctl` (PipeWire) and GPU widgets use NVML (NVIDIA) or sysfs (AMD).
+
+## Developing the app
+
+```sh
+cd app
+npm install
+npx tauri dev        # the app, talking to a running masterhubd
+npm run dev          # just the UI in a browser at http://localhost:5174, with a sample hub
+```
 
 ## Configure
 
