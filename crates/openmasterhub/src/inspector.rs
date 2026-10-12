@@ -419,6 +419,33 @@ fn module_groups(app: &Rc<App>, serial: &str) -> Vec<adw::PreferencesGroup> {
     }
     groups.push(info);
 
+    if module.kind == "base" {
+        use masterhub_core::config::Orientation;
+        let g = adw::PreferencesGroup::builder().title("Placement").build();
+        let row = adw::ComboRow::builder()
+            .title("Orientation")
+            .subtitle("How the Base lies on your desk. Automatic uses its tilt sensor.")
+            .model(&gtk::StringList::new(&["Automatic", "Landscape", "Portrait"]))
+            .build();
+        let current = app.model.borrow().config.orientation;
+        row.set_selected(match current {
+            Orientation::Auto => 0,
+            Orientation::Landscape => 1,
+            Orientation::Portrait => 2,
+        });
+        let a = app.clone();
+        row.connect_selected_notify(move |r| {
+            let o = match r.selected() {
+                1 => Orientation::Landscape,
+                2 => Orientation::Portrait,
+                _ => Orientation::Auto,
+            };
+            a.edit(|m| m.config.orientation = o);
+        });
+        g.add(&row);
+        groups.push(g);
+    }
+
     let led_count = match module.kind.as_str() {
         "base" => 1,
         "fader" => 5,
