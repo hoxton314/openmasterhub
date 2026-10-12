@@ -1,0 +1,4 @@
+# Cooler Master MasterHUB modules: give the logged-in user access to hidraw/usb nodes
+# 01f6 Base, 01fe 15xKey IPS, 0200 Fader, 0202 Knob, 0204 Roller, 0206 Dial w/ LCD (M131E), 99xx alternate PIDs
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2516", ATTRS{idProduct}=="01f6|01fe|0200|0202|0204|0206|99[89][0-9]", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2516", ATTRS{idProduct}=="01f6|01fe|0200|0202|0204|0206|99[89][0-9]", TAG+="uaccess"
