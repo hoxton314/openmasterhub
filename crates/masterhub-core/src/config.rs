@@ -18,6 +18,9 @@ pub struct Config {
     pub backlight: u8,
     #[serde(default, skip_serializing_if = "Leds::is_empty")]
     pub leds: Leds,
+    /// How the Base is placed on the desk. `auto` follows its tilt sensor.
+    #[serde(default, skip_serializing_if = "Orientation::is_auto")]
+    pub orientation: Orientation,
     /// The first profile is the default; it is used when no other profile matches the
     /// focused application.
     #[serde(default, rename = "profile", skip_serializing_if = "Vec::is_empty")]
@@ -26,6 +29,31 @@ pub struct Config {
 
 fn default_backlight() -> u8 {
     80
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Orientation {
+    /// Follow the Base's sensor; landscape until it reports.
+    #[default]
+    Auto,
+    Landscape,
+    Portrait,
+}
+
+impl Orientation {
+    pub fn is_auto(&self) -> bool {
+        *self == Self::Auto
+    }
+
+    /// Resolve to "is the Base horizontal (landscape)?".
+    pub fn horizontal(self, sensor: Option<bool>) -> bool {
+        match self {
+            Self::Landscape => true,
+            Self::Portrait => false,
+            Self::Auto => sensor.unwrap_or(true),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

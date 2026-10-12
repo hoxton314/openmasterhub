@@ -71,7 +71,8 @@ pub struct Controller {
     profile: usize,
     page: usize,
     folders: Vec<String>,
-    horizontal: bool,
+    /// Last orientation reported by the Base's sensor, if any.
+    sensor_horizontal: Option<bool>,
     active_app: Option<String>,
     anims: HashMap<(String, u8), Anim>,
     stats: Stats,
@@ -108,7 +109,7 @@ impl Controller {
             profile: 0,
             page: 0,
             folders: Vec::new(),
-            horizontal: false,
+            sensor_horizontal: None,
             active_app: None,
             anims: HashMap::new(),
             stats: Stats::new(),
@@ -540,8 +541,8 @@ impl Controller {
             InputReport::DialTurn(r) => events.push(("dial", 0, if r == Rotation::Clockwise { "cw" } else { "ccw" }, None)),
             InputReport::DialButton { pressed } => events.push(("dial", 0, if pressed { "down" } else { "up" }, None)),
             InputReport::BaseOrientation { horizontal } => {
-                if horizontal != self.horizontal {
-                    self.horizontal = horizontal;
+                if self.sensor_horizontal != Some(horizontal) {
+                    self.sensor_horizontal = Some(horizontal);
                     self.publish_state();
                 }
             }
@@ -611,7 +612,7 @@ impl Controller {
             profile: self.profile_name().unwrap_or_default().to_owned(),
             page: self.page_ref().map(|p| p.name.clone()).unwrap_or_default(),
             in_folder: !self.folders.is_empty(),
-            horizontal: self.horizontal,
+            horizontal: self.config.orientation.horizontal(self.sensor_horizontal),
             active_app: self.active_app.clone(),
         };
         let json = serde_json::to_string(&state).unwrap_or_default();
