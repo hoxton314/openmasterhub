@@ -2,9 +2,9 @@
 
 mod actions;
 mod controller;
-mod dbus;
 mod focus;
 mod hid;
+mod ipc;
 mod keyboard;
 mod stats;
 mod worker;
@@ -19,16 +19,14 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use masterhub_core::config::{self, Config};
-use masterhub_core::dbus::{BUS_NAME, OBJECT_PATH};
 
 use crate::controller::{Controller, Snapshot};
 
-const USAGE: &str = "usage: masterhubd [--config PATH] [--check] [--list] [--no-dbus]
+const USAGE: &str = "usage: masterhubd [--config PATH] [--check] [--list]
 
   --config PATH  config file (default: $XDG_CONFIG_HOME/openmasterhub/config.toml)
   --check        validate the config and exit
   --list         list connected modules and exit
-  --no-dbus      don't register on the session bus (no GUI control)
 
 Logging: RUST_LOG=debug masterhubd";
 
@@ -36,14 +34,13 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let mut config_path = None;
-    let (mut check, mut list, mut no_dbus) = (false, false, false);
+    let (mut check, mut list) = (false, false);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--config" => config_path = Some(PathBuf::from(args.next().context("--config needs a path")?)),
             "--check" => check = true,
             "--list" => list = true,
-            "--no-dbus" => no_dbus = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return Ok(());
@@ -84,28 +81,16 @@ fn main() -> Result<()> {
 
     let (ctl_tx, ctl_rx) = channel();
     let snapshot = Arc::new(Mutex::new(Snapshot::default()));
-    // Windows has no session bus; the GUI link there comes with the cross-platform IPC.
-    let no_dbus = no_dbus || cfg!(windows);
-    let bus = if no_dbus {
-        None
-    } else {
-        let api = dbus::Api { controller: ctl_tx.clone(), snapshot: snapshot.clone() };
-        let conn = zbus::blocking::connection::Builder::session()
-            .and_then(|b| b.name(BUS_NAME))
-            .and_then(|b| b.serve_at(OBJECT_PATH, api))
-            .and_then(|b| b.build())
-            .with_context(|| format!("registering {BUS_NAME} on the session bus (is masterhubd already running?)"))?;
-        log::info!("D-Bus API at {BUS_NAME}");
-        Some(conn)
-    };
+    let events = Arc::new(ipc::Broadcaster::default());
+    ipc::serve(ctl_tx.clone(), snapshot.clone(), events.clone())?;
 
     let actions = actions::spawn();
     {
-        let (snapshot, bus) = (snapshot.clone(), bus.clone());
+        let snapshot = snapshot.clone();
         let path = path.clone();
         thread::Builder::new()
             .name("controller".into())
-            .spawn(move || Controller::new(config, text, path, actions, snapshot, bus).run(ctl_rx))
+            .spawn(move || Controller::new(config, text, path, actions, snapshot, events).run(ctl_rx))
             .context("spawning controller")?;
     }
     focus::spawn(ctl_tx.clone());

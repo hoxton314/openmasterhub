@@ -2,6 +2,6 @@
 //! layout, face rendering and the D-Bus interface description.
 
 pub mod config;
-pub mod dbus;
+pub mod ipc;
 pub mod layout;
 pub mod render;

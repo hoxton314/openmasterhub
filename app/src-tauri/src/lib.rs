@@ -1,19 +1,16 @@
 //! OpenMasterHUB desktop app: a Tauri shell around the Svelte UI. The Rust side talks to the
 //! masterhubd service and forwards its live events to the UI.
 
-mod client;
-
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use base64::Engine;
 use masterhub_core::config::{Config, Face, Widget};
-use masterhub_core::dbus::{HubState, ModuleState};
+use masterhub_core::ipc::{Client, ClientEvent, DisplayImage, Event, HubState, ModuleState};
 use masterhub_core::render::{KEY_SIZE, LiveData, Picture, Renderer, load_picture};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use crate::client::{Client, Event};
 
 struct AppState {
     client: Client,
@@ -40,6 +37,7 @@ struct Snapshot {
 }
 
 fn data_url(jpeg: &[u8]) -> String {
+    // Local previews only; device images arrive base64-encoded already.
     format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpeg))
 }
 
@@ -67,7 +65,7 @@ fn snapshot(state: State<AppState>) -> Snapshot {
             .displays()
             .unwrap_or_default()
             .into_iter()
-            .map(|(serial, target, jpeg)| Display { serial, target, src: data_url(&jpeg) })
+            .map(Display::from)
             .collect(),
     }
 }
@@ -118,7 +116,7 @@ fn open_window_classes() -> Vec<String> {
         .into_iter()
         .flatten()
         .filter_map(|c| c.get("class")?.as_str().map(str::to_owned))
-        .filter(|c| !c.is_empty() && c != masterhub_core::dbus::GUI_APP_ID && !c.starts_with("openmasterhub"))
+        .filter(|c| !c.is_empty() && c != masterhub_core::ipc::GUI_APP_ID && !c.starts_with("openmasterhub"))
         .collect();
     classes.sort();
     classes.dedup();
@@ -131,19 +129,23 @@ fn start_service() -> Result<(), String> {
     if ok { Ok(()) } else { Err("Could not start masterhubd.service; run masterhubd in a terminal instead.".into()) }
 }
 
+impl From<DisplayImage> for Display {
+    fn from(d: DisplayImage) -> Self {
+        Self { serial: d.serial, target: d.target, src: format!("data:image/jpeg;base64,{}", d.jpeg) }
+    }
+}
+
 /// Forward service events to the UI.
-fn forward_events(app: AppHandle, rx: async_channel::Receiver<Event>) {
+fn forward_events(app: AppHandle, rx: std::sync::mpsc::Receiver<ClientEvent>) {
     std::thread::spawn(move || {
-        while let Ok(event) = rx.recv_blocking() {
+        while let Ok(event) = rx.recv() {
             let r = match event {
-                Event::Online(online) => app.emit("hub:online", online),
-                Event::Input(i) => app.emit("hub:input", i),
-                Event::State(s) => app.emit("hub:state", s),
-                Event::Modules(m) => app.emit("hub:modules", m),
-                Event::Display { serial, target, jpeg } => {
-                    app.emit("hub:display", Display { serial, target, src: data_url(&jpeg) })
-                }
-                Event::ConfigChanged => {
+                ClientEvent::Online(online) => app.emit("hub:online", online),
+                ClientEvent::Event(Event::Input(i)) => app.emit("hub:input", i),
+                ClientEvent::Event(Event::State(s)) => app.emit("hub:state", s),
+                ClientEvent::Event(Event::Modules(m)) => app.emit("hub:modules", m),
+                ClientEvent::Event(Event::Display(d)) => app.emit("hub:display", Display::from(d)),
+                ClientEvent::Event(Event::ConfigChanged) => {
                     // Ignore the echo of our own save; pass on edits made elsewhere.
                     let state = app.state::<AppState>();
                     let ours = state.client.config().ok().is_some_and(|t| state.last_sent.lock().unwrap().as_deref() == Some(t.as_str()));
@@ -180,8 +182,10 @@ pub fn run() {
     linux_webkit_env();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let (tx, rx) = async_channel::unbounded();
-    let client = Client::connect(tx).expect("connecting to the session bus");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let client = Client::start(move |e| {
+        let _ = tx.send(e);
+    });
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState { client, renderer: Renderer::new(None), last_sent: Mutex::new(None) })

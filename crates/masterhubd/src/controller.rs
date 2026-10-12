@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use masterhub_core::config::{Action, Config, Face, Leds, Page, Side, Widget};
-use masterhub_core::dbus::{GUI_APP_ID, HubState, INTERFACE, InputMsg, ModuleState, OBJECT_PATH, TARGET_DIAL};
+use masterhub_core::ipc::{DisplayImage, Event, GUI_APP_ID, HubState, InputMsg, ModuleState, TARGET_DIAL};
 use masterhub_core::layout;
 use masterhub_core::render::{DIAL_SIZE, KEY_SIZE, LiveData, Picture, Renderer, load_picture};
 use masterhub_proto::{
@@ -19,6 +19,7 @@ use masterhub_proto::{
 };
 
 use crate::actions::Request;
+use crate::ipc::Broadcaster;
 use crate::hid::ModuleInfo;
 use crate::stats::Stats;
 use crate::worker::DeviceCmd;
@@ -81,7 +82,7 @@ pub struct Controller {
     live: HashMap<Widget, LiveData>,
     actions: Sender<Request>,
     snapshot: Arc<Mutex<Snapshot>>,
-    bus: Option<zbus::blocking::Connection>,
+    events: Arc<Broadcaster>,
 }
 
 const TICK: Duration = Duration::from_secs(1);
@@ -93,7 +94,7 @@ impl Controller {
         config_path: PathBuf,
         actions: Sender<Request>,
         snapshot: Arc<Mutex<Snapshot>>,
-        bus: Option<zbus::blocking::Connection>,
+        events: Arc<Broadcaster>,
     ) -> Self {
         {
             let mut s = snapshot.lock().unwrap();
@@ -118,7 +119,7 @@ impl Controller {
             live: HashMap::new(),
             actions,
             snapshot,
-            bus,
+            events,
         };
         c.publish_state();
         c
@@ -244,7 +245,7 @@ impl Controller {
         for serial in serials {
             self.init_module(&serial);
         }
-        self.emit("ConfigChanged", &());
+        self.events.send(Event::ConfigChanged);
         self.publish_state();
     }
 
@@ -453,7 +454,7 @@ impl Controller {
         let it = if target == TARGET_DIAL { ImageTarget::Dial } else { ImageTarget::Key(target) };
         let _ = m.tx.send(DeviceCmd::Image { target: it, jpeg: jpeg.clone() });
         self.snapshot.lock().unwrap().displays.insert((serial.to_owned(), target), jpeg.clone());
-        self.emit("DisplayChanged", &(serial, target, jpeg.as_slice()));
+        self.events.send(Event::Display(DisplayImage::new(serial, target, &jpeg)));
     }
 
     /// How far to turn a module's images (clockwise) so they read upright for the user: the
@@ -576,9 +577,7 @@ impl Controller {
                 event: event.into(),
                 value,
             };
-            if let Ok(json) = serde_json::to_string(&msg) {
-                self.emit("Input", &(json,));
-            }
+            self.events.send(Event::Input(msg));
             if let Some(action) = self.binding(control, index, event) {
                 let coalesce = (control == "fader").then(|| format!("{serial}/fader{index}"));
                 if !self.navigate(&action) {
@@ -634,15 +633,14 @@ impl Controller {
             rotation: self.config.orientation.rotation(self.sensor_horizontal),
             active_app: self.active_app.clone(),
         };
-        let json = serde_json::to_string(&state).unwrap_or_default();
         let changed = {
             let mut s = self.snapshot.lock().unwrap();
             let changed = s.state != state;
-            s.state = state;
+            s.state = state.clone();
             changed
         };
         if changed {
-            self.emit("StateChanged", &(json,));
+            self.events.send(Event::State(state));
         }
     }
 
@@ -667,7 +665,6 @@ impl Controller {
                 }
             })
             .collect();
-        let json = serde_json::to_string(&modules).unwrap_or_default();
         let mut moved = false;
         for ms in &modules {
             if let Some(m) = self.modules.get_mut(&ms.serial)
@@ -677,18 +674,10 @@ impl Controller {
                 moved = true;
             }
         }
-        self.snapshot.lock().unwrap().modules = modules;
-        self.emit("ModulesChanged", &(json,));
+        self.snapshot.lock().unwrap().modules = modules.clone();
+        self.events.send(Event::Modules(modules));
         if moved {
             self.refresh_all();
-        }
-    }
-
-    fn emit<B: serde::Serialize + zbus::zvariant::DynamicType>(&self, signal: &str, body: &B) {
-        if let Some(bus) = &self.bus
-            && let Err(e) = bus.emit_signal(None::<zbus::names::BusName>, OBJECT_PATH, INTERFACE, signal, body)
-        {
-            log::debug!("emitting {signal}: {e}");
         }
     }
 }
