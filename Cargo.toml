@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/masterhub-proto", "crates/masterhubd"]
+members = ["crates/masterhub-proto", "crates/masterhub-core", "crates/masterhubd"]
 
 [workspace.package]
 version = "0.1.0"

@@ -11,7 +11,7 @@ use anyhow::{Result, anyhow, bail};
 use evdev::uinput::VirtualDevice;
 use evdev::{AttributeSet, KeyCode, KeyEvent};
 
-use crate::config::Action;
+use masterhub_core::config::Action;
 
 pub struct Request {
     pub action: Action,
@@ -42,6 +42,8 @@ fn run(rx: Receiver<Request>) {
                         log::error!("keys {combo:?}: {e:#}");
                     }
                 }
+                // Navigation is handled by the controller and never reaches this thread.
+                Action::Page(_) | Action::Folder(_) | Action::Back(_) | Action::Profile(_) => {}
                 Action::Cmd(cmd) => {
                     let cmd = match req.value {
                         Some(v) => cmd.replace("{value}", &v.to_string()),
@@ -141,7 +143,7 @@ pub fn parse_combo(combo: &str) -> Result<Vec<KeyCode>> {
 pub fn validate(action: &Action) -> Result<()> {
     match action {
         Action::Keys(k) => parse_combo(k).map(|_| ()),
-        Action::Cmd(_) => Ok(()),
+        _ => Ok(()),
     }
 }
 

@@ -56,7 +56,7 @@ impl FeatureCommand {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Rgb {
     pub r: u8,
     pub g: u8,

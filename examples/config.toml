@@ -1,79 +1,177 @@
 # openmasterhub example configuration
-# Copy to ~/.config/openmasterhub/config.toml
+# Copy to ~/.config/openmasterhub/config.toml (the GUI edits this file for you).
 #
-# Actions:  press = { cmd = "shell command" }   (runs with sh -c)
-#           press = { keys = "ctrl+shift+m" }    (virtual keyboard; key names as in
-#                                                 linux/input-event-codes.h without KEY_,
-#                                                 e.g. playpause, volumeup, f13)
-# Faders:   change = { cmd = "... {value} ..." } ({value} = 0..100, left..right)
+# Actions:
+#   { cmd = "shell command" }       run with sh -c ({value} = fader position 0..100)
+#   { keys = "ctrl+shift+m" }       virtual keyboard; names from linux/input-event-codes.h
+#                                   without KEY_ (playpause, volumeup, f13, ...)
+#   { page = "next" | "prev" | "<page name>" }
+#   { folder = "<folder name>" }    open a keypad folder
+#   { back = true }                 leave the folder
+#   { profile = "<profile name>" }  switch profile
+#
+# Widgets (key or dial face): { kind = "clock", format = "%H:%M" }, cpu_usage, cpu_temp,
+#   ram_usage, gpu_usage, gpu_temp, volume, now_playing.
+# Images: PNG/JPEG, or GIF (animated).
+#
+# The first profile is the default. Other profiles activate when the focused window's class
+# matches one of their `apps` (Hyprland; case-insensitive, * wildcards).
 
-# font = "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"   # default: fc-match sans:bold
 backlight = 80
 
 [leds]
 base = "#ff2020"
 fader = ["#ff0000", "#ff8000", "#ffff00", "#00ff00", "#0080ff"]   # top..bottom
-knob = "#8000ff"
+knob = ["#ff0000", "#00ff00", "#0000ff"]                           # bottom-left, bottom-right, top
 brightness = 100
 
-# ---- 15-key keypad: index 0..14, row-major from top-left ----
-[[key]]
+# ─────────────────────────────── Default profile ───────────────────────────────
+[[profile]]
+name = "Default"
+
+[[profile.page]]
+name = "Main"
+
+[[profile.page.key]]
 index = 0
 label = "Play"
 background = "#1e5ac8"
 press = { keys = "playpause" }
 
-[[key]]
+[[profile.page.key]]
 index = 1
 label = "Prev"
 background = "#283c64"
 press = { keys = "previoussong" }
 
-[[key]]
+[[profile.page.key]]
 index = 2
 label = "Next"
 background = "#283c64"
 press = { keys = "nextsong" }
 
-[[key]]
+[[profile.page.key]]
+index = 3
+widget = { kind = "clock" }
+background = "#101010"
+
+[[profile.page.key]]
 index = 4
 label = "Mute"
 background = "#c81e1e"
 press = { cmd = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" }
 
-[[key]]
+[[profile.page.key]]
+index = 5
+widget = { kind = "cpu_usage" }
+
+[[profile.page.key]]
+index = 6
+widget = { kind = "gpu_usage" }
+
+[[profile.page.key]]
+index = 7
+widget = { kind = "ram_usage" }
+
+[[profile.page.key]]
+index = 10
+label = "Apps"
+background = "#3a3a46"
+press = { folder = "Apps" }
+
+[[profile.page.key]]
 index = 14
+label = "Page 2"
+background = "#3a3a46"
+press = { page = "next" }
+
+[[profile.page]]
+name = "Second"
+
+[[profile.page.key]]
+index = 0
+widget = { kind = "now_playing" }
+press = { keys = "playpause" }
+
+[[profile.page.key]]
+index = 14
+label = "Back"
+background = "#3a3a46"
+press = { page = "prev" }
+
+[[profile.folder]]
+name = "Apps"
+
+[[profile.folder.key]]
+index = 0
+label = "Back"
+background = "#3a3a46"
+press = { back = true }
+
+[[profile.folder.key]]
+index = 1
 label = "Term"
 background = "#202020"
-press = { cmd = "xdg-terminal-exec || konsole || gnome-terminal" }
+press = { cmd = "xdg-terminal-exec || kitty || foot" }
 
-# ---- big dial with 240x240 screen ----
-[dial]
-label = "Volume"
-background = "#101828"
+[[profile.folder.key]]
+index = 2
+label = "Files"
+background = "#202020"
+press = { cmd = "xdg-open ~" }
+
+[profile.dial]
+widget = { kind = "volume" }
 cw = { cmd = "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 1%+" }
 ccw = { cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 1%-" }
 press = { cmd = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" }
 
-# ---- faders: index 0 = top ----
-[[fader]]
+[[profile.fader]]
 index = 0
 change = { cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ {value}%" }
 
-# ---- knobs: 0 = bottom-left, 1 = bottom-right, 2 = top ----
-[[knob]]
+[[profile.knob]]
 index = 2
 cw = { keys = "volumeup" }
 ccw = { keys = "volumedown" }
 press = { keys = "mute" }
 
-# ---- rollers ----
-[[roller]]
+[[profile.roller]]
 side = "left"
 away = { keys = "up" }
 toward = { keys = "down" }
 
-[[roller]]
+[[profile.roller]]
 side = "right"
 away = { keys = "pageup" }
 toward = { keys = "pagedown" }
+
+# ─────────────────────── OBS profile (active while OBS is focused) ───────────────────────
+[[profile]]
+name = "Streaming"
+apps = ["com.obsproject.Studio", "obs"]
+
+[profile.leds]
+base = "#8000ff"
+
+[[profile.page]]
+name = "Scenes"
+
+[[profile.page.key]]
+index = 0
+label = "Scene 1"
+background = "#6a1b9a"
+press = { keys = "ctrl+alt+f1" }
+
+[[profile.page.key]]
+index = 1
+label = "Scene 2"
+background = "#6a1b9a"
+press = { keys = "ctrl+alt+f2" }
+
+[[profile.page.key]]
+index = 4
+widget = { kind = "cpu_temp" }
+
+[profile.dial]
+widget = { kind = "cpu_usage" }

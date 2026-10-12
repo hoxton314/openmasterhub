@@ -15,6 +15,8 @@ pub struct ModuleInfo {
     pub kind: ModuleKind,
     pub serial: String,
     pub devnode: PathBuf,
+    /// USB device name in sysfs, e.g. `3-1.2.2` (bus-ports).
+    pub usb_name: Option<String>,
 }
 
 /// List all MasterHUB modules currently exposed as hidraw devices.
@@ -35,11 +37,31 @@ pub fn enumerate() -> Vec<ModuleInfo> {
                 kind: ModuleKind::from_pid(pid)?,
                 serial,
                 devnode: Path::new("/dev").join(e.file_name()),
+                usb_name: usb_name(&e.path()),
             })
         })
         .collect();
     found.sort_by(|a, b| a.serial.cmp(&b.serial));
     found
+}
+
+/// Walk up from the hidraw node to the USB device directory, e.g. `.../3-1.2.2/3-1.2.2:1.0/...`.
+fn usb_name(hidraw: &Path) -> Option<String> {
+    let real = std::fs::canonicalize(hidraw.join("device")).ok()?;
+    real.ancestors()
+        .filter_map(|p| p.file_name()?.to_str())
+        .find(|n| is_usb_device_name(n))
+        .map(str::to_owned)
+}
+
+/// `3-1.2.2` yes, `3-1.2.2:1.0` (an interface) or `usb3` no.
+fn is_usb_device_name(n: &str) -> bool {
+    n.split_once('-').is_some_and(|(bus, ports)| {
+        !bus.is_empty()
+            && bus.bytes().all(|b| b.is_ascii_digit())
+            && !ports.is_empty()
+            && ports.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+    })
 }
 
 /// `HID_ID=0003:00002516:000001FE` -> (vid, pid)
@@ -134,6 +156,15 @@ mod tests {
     fn hid_id() {
         let u = "DRIVER=hid-generic\nHID_ID=0003:00002516:000001FE\nHID_NAME=COOLER MASTER\n";
         assert_eq!(parse_hid_id(u), Some((0x2516, 0x01FE)));
+    }
+
+    #[test]
+    fn usb_names() {
+        assert!(is_usb_device_name("3-1.2.2"));
+        assert!(is_usb_device_name("1-4"));
+        assert!(!is_usb_device_name("3-1.2.2:1.0"));
+        assert!(!is_usb_device_name("usb3"));
+        assert!(!is_usb_device_name("0003:2516:01FE.000E"));
     }
 
     #[test]
