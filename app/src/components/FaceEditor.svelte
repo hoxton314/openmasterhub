@@ -1,99 +1,174 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core';
-  import { open as openDialog } from '@tauri-apps/plugin-dialog';
+  import { Clock, Cpu, Gpu, ImagePlus, MemoryStick, Music2, Thermometer, Volume2, X } from 'lucide-svelte';
+  import { invoke, pickImage } from '../lib/backend';
+  import ColorField from './ColorField.svelte';
   import type { Face, Widget } from '../lib/types';
 
-  let { face, onchange }: { face: Face; onchange: (f: (face: Face) => void) => void } = $props();
+  let {
+    face,
+    live,
+    round = false,
+    liveTurn = 0,
+    onchange,
+  }: { face: Face; live?: string; round?: boolean; liveTurn?: number; onchange: (f: (face: Face) => void) => void } = $props();
 
-  const WIDGETS: [Widget['kind'] | '', string][] = [
-    ['', 'None'],
-    ['clock', 'Clock'],
-    ['cpu_usage', 'CPU usage'],
-    ['cpu_temp', 'CPU temperature'],
-    ['ram_usage', 'RAM usage'],
-    ['gpu_usage', 'GPU usage'],
-    ['gpu_temp', 'GPU temperature'],
-    ['volume', 'Volume'],
-    ['now_playing', 'Now playing'],
-  ];
+  const WIDGETS = [
+    { k: 'clock', label: 'Clock', icon: Clock },
+    { k: 'cpu_usage', label: 'CPU', icon: Cpu },
+    { k: 'cpu_temp', label: 'CPU temp', icon: Thermometer },
+    { k: 'ram_usage', label: 'RAM', icon: MemoryStick },
+    { k: 'gpu_usage', label: 'GPU', icon: Gpu },
+    { k: 'gpu_temp', label: 'GPU temp', icon: Thermometer },
+    { k: 'volume', label: 'Volume', icon: Volume2 },
+    { k: 'now_playing', label: 'Playing', icon: Music2 },
+  ] as const;
 
   let preview = $state('');
-  // Re-render the local preview whenever the face changes.
   $effect(() => {
     const snapshot = $state.snapshot(face);
     invoke<string>('preview_face', { face: snapshot }).then((src) => (preview = src)).catch(() => (preview = ''));
   });
 
-  async function pickImage() {
-    const path = await openDialog({ multiple: false, filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif'] }] });
-    if (typeof path === 'string') onchange((f) => (f.image = path));
+  async function chooseImage() {
+    const path = await pickImage();
+    if (path) onchange((f) => (f.image = path));
   }
 </script>
 
-<div class="face">
-  {#if preview}<img class="preview" src={preview} alt="Preview" />{/if}
+<div class="previews">
+  <figure>
+    <div class="tile" class:round>{#if preview}<img src={preview} alt="" />{/if}</div>
+    <figcaption>Design</figcaption>
+  </figure>
+  <figure>
+    <div class="tile" class:round class:empty={!live}>{#if live}<img src={live} alt="" style="transform: rotate({liveTurn}deg)" />{/if}</div>
+    <figcaption>On device</figcaption>
+  </figure>
+</div>
 
-  <label class="row">
-    <span>Label</span>
-    <input value={face.label ?? ''} oninput={(e) => { const v = e.currentTarget.value; onchange((f) => (f.label = v || undefined)); }} />
-  </label>
-
-  <div class="row">
-    <span>Background</span>
-    <div class="color">
-      <input type="color" value={face.background ?? '#000000'} oninput={(e) => { const v = e.currentTarget.value; onchange((f) => (f.background = v)); }} />
-      {#if face.background}<button class="flat" title="Default" onclick={() => onchange((f) => (f.background = undefined))}>↺</button>{/if}
-    </div>
+<div class="group">
+  <div class="field">
+    <span class="label">Label</span>
+    <input class="input" value={face.label ?? ''} placeholder="No label" oninput={(e) => { const v = e.currentTarget.value; onchange((f) => (f.label = v || undefined)); }} />
   </div>
-
-  <div class="row">
-    <span>Text colour</span>
-    <div class="color">
-      <input type="color" value={face.text_color ?? '#ffffff'} oninput={(e) => { const v = e.currentTarget.value; onchange((f) => (f.text_color = v)); }} />
-      {#if face.text_color}<button class="flat" title="Default" onclick={() => onchange((f) => (f.text_color = undefined))}>↺</button>{/if}
-    </div>
+  <div class="field">
+    <span class="label">Background</span>
+    <ColorField value={face.background} onchange={(v) => onchange((f) => (f.background = v))} />
   </div>
-
-  <div class="row">
-    <span>Image</span>
-    <div class="image">
-      <span class="path" title={face.image}>{face.image ? face.image.split(/[\\/]/).pop() : 'None'}</span>
-      <button class="flat" onclick={pickImage}>Choose…</button>
-      {#if face.image}<button class="flat" title="Remove" onclick={() => onchange((f) => (f.image = undefined))}>✕</button>{/if}
-    </div>
+  <div class="field">
+    <span class="label">Text</span>
+    <ColorField value={face.text_color} fallback="#ffffff" swatches={['#ffffff', '#d1d5db', '#000000', '#facc15', '#60a5fa', '#f87171']} onchange={(v) => onchange((f) => (f.text_color = v))} />
   </div>
+  <div class="field">
+    <span class="label">Image</span>
+    {#if face.image}
+      <div class="file">
+        <span class="name" title={face.image}>{face.image.split(/[\\/]/).pop()}</span>
+        <button class="btn ghost sm icon" title="Remove image" onclick={() => onchange((f) => (f.image = undefined))}><X size={13} /></button>
+      </div>
+    {:else}
+      <button class="btn sm add" onclick={chooseImage}><ImagePlus size={13} />Choose image or GIF</button>
+    {/if}
+  </div>
+</div>
 
-  <label class="row">
-    <span>Live widget</span>
-    <select
-      value={face.widget?.kind ?? ''}
-      onchange={(e) => { const k = e.currentTarget.value; onchange((f) => (f.widget = k ? ({ kind: k } as Widget) : undefined)); }}
-    >
-      {#each WIDGETS as [k, label]}<option value={k}>{label}</option>{/each}
-    </select>
-  </label>
+<div class="group">
+  <div class="group-title">Live widget</div>
+  <div class="widgets">
+    <button class="widget" class:on={!face.widget} onclick={() => onchange((f) => (f.widget = undefined))}>None</button>
+    {#each WIDGETS as { k, label, icon: I }}
+      <button class="widget" class:on={face.widget?.kind === k} onclick={() => onchange((f) => (f.widget = { kind: k } as Widget))}>
+        <I size={13} />{label}
+      </button>
+    {/each}
+  </div>
 </div>
 
 <style>
-  .preview {
-    display: block;
-    width: 96px;
-    height: 96px;
-    margin: 4px auto 14px;
-    border-radius: 14px;
-    box-shadow: 0 4px 16px rgb(0 0 0 / 0.45);
-  }
-  .color,
-  .image {
+  .previews {
     display: flex;
-    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    padding: 18px 16px 16px;
+  }
+  figure {
+    margin: 0;
+    display: grid;
+    justify-items: center;
     gap: 6px;
   }
-  .path {
-    max-width: 150px;
+  figcaption {
+    font-size: 11.5px;
+    color: var(--text-3);
+  }
+  .tile {
+    width: 92px;
+    height: 92px;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #000;
+    box-shadow: 0 0 0 1px var(--border-strong), 0 6px 18px rgb(0 0 0 / 0.35);
+  }
+  .tile.round {
+    border-radius: 50%;
+  }
+  .tile.empty {
+    background: var(--bg-input);
+    box-shadow: 0 0 0 1px var(--border);
+  }
+  .tile img {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .file {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    min-width: 0;
+    height: 28px;
+    padding-left: 9px;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .file .name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: var(--fg-dim);
+  }
+  .add {
+    justify-self: start;
+    color: var(--text-2);
+  }
+  .widgets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .widget {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 9px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-2);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+  .widget:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+  .widget.on {
+    color: var(--accent-text);
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
 </style>

@@ -6,7 +6,7 @@
   } from '../lib/geometry';
   import { TARGET_DIAL, type ModuleState, type Selection } from '../lib/types';
 
-  const PAD = 0.35;
+  const PAD = 0.5;
 
   interface Placed {
     m: ModuleState;
@@ -14,7 +14,7 @@
     unknown: boolean;
   }
 
-  // Lay out: known sockets where they sit (possibly overhanging), unknown ones in a tray.
+  // Known sockets where they sit (possibly overhanging the Base); unknown ones in a tray.
   const layout = $derived.by(() => {
     const view = viewMatrix(hub.state.rotation ?? 90);
     const mods = [...hub.modules].sort((a, b) => Number(a.kind !== 'base') - Number(b.kind !== 'base'));
@@ -35,14 +35,15 @@
     for (const p of placed) add(p.matrix, FOOTPRINT[p.m.kind]);
     if (!isFinite(x0)) add(view, [GRID_COLS, GRID_ROWS]);
     let tx = x0;
-    const ty = y1 + 0.8;
+    const ty = y1 + 0.9;
     for (const m of tray) {
       const matrix = translate(tx, ty);
       add(matrix, FOOTPRINT[m.kind]);
       tx += FOOTPRINT[m.kind][0] + 0.3;
       placed.push({ m, matrix, unknown: true });
     }
-    return { placed, viewBox: `${x0 - PAD} ${y0 - PAD - (tray.length ? 0.3 : 0)} ${x1 - x0 + 2 * PAD} ${y1 - y0 + 2 * PAD + (tray.length ? 0.3 : 0)}` };
+    const top = tray.length ? 0.35 : 0;
+    return { placed, viewBox: `${x0 - PAD} ${y0 - PAD - top} ${x1 - x0 + 2 * PAD} ${y1 - y0 + 2 * PAD + top}` };
   });
 
   const sel = (s: Selection) => (e: Event) => {
@@ -55,105 +56,82 @@
 
 <svg class="hub" viewBox={layout.viewBox} role="presentation" onclick={() => (hub.selection = { kind: 'none' })}>
   <defs>
-    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2b2b30" />
-      <stop offset="1" stop-color="#17171a" />
-    </linearGradient>
-    <radialGradient id="knob" cx="0.4" cy="0.35" r="0.7">
-      <stop offset="0" stop-color="#5c5c63" />
-      <stop offset="1" stop-color="#1f1f22" />
-    </radialGradient>
-    <linearGradient id="roller" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#19191b" />
-      <stop offset="0.5" stop-color="#4a4a50" />
-      <stop offset="1" stop-color="#141416" />
-    </linearGradient>
-    <clipPath id="key-clip" clipPathUnits="objectBoundingBox"><rect width="1" height="1" rx="0.12" /></clipPath>
+    <clipPath id="key-clip" clipPathUnits="objectBoundingBox"><rect width="1" height="1" rx="0.13" /></clipPath>
     <clipPath id="round-clip" clipPathUnits="objectBoundingBox"><circle cx="0.5" cy="0.5" r="0.5" /></clipPath>
-    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="0.08" />
-    </filter>
   </defs>
 
   {#each layout.placed as { m, matrix, unknown } (m.serial)}
     {@const [w, h] = FOOTPRINT[m.kind]}
-    <g transform={svg(matrix)} class="module" class:selected={isSel({ kind: 'module', serial: m.serial })}>
+    {@const modSel = isSel({ kind: 'module', serial: m.serial })}
+    <g transform={svg(matrix)} class="module" class:unknown>
       {#if m.kind === 'base'}
         {@const led = ledColor('base', 0)}
-        {#if led}
-          <rect x="-0.12" y="-0.12" width={w + 0.24} height={h + 0.24} rx="0.32" fill="none" stroke={led} stroke-width="0.1" opacity="0.55" filter="url(#glow)" />
-        {/if}
-        <rect width={w} height={h} rx="0.2" fill="#0f0f12" onclick={sel({ kind: 'module', serial: m.serial })} role="presentation" />
+        {#if led}<rect class="base-led" x="-0.05" y="-0.05" width={w + 0.1} height={h + 0.1} rx="0.27" stroke={led} />{/if}
+        <rect class="base" width={w} height={h} rx="0.22" onclick={sel({ kind: 'module', serial: m.serial })} role="presentation" />
         {#each Array(GRID_COLS * GRID_ROWS) as _, i}
-          <rect x={(i % GRID_COLS) + 0.08} y={Math.floor(i / GRID_COLS) + 0.08} width="0.84" height="0.84" rx="0.1" fill="white" opacity="0.035" pointer-events="none" />
+          <circle cx={(i % GRID_COLS) + 0.5} cy={Math.floor(i / GRID_COLS) + 0.5} r="0.035" class="socket" />
         {/each}
       {:else}
-        <rect x="0.05" y="0.05" width={w - 0.1} height={h - 0.1} rx="0.16" fill="url(#body)" stroke="white" stroke-opacity="0.08" stroke-width="0.02" onclick={sel({ kind: 'module', serial: m.serial })} role="presentation" />
+        <rect class="body" x="0.06" y="0.06" width={w - 0.12} height={h - 0.12} rx="0.18" onclick={sel({ kind: 'module', serial: m.serial })} role="presentation" />
       {/if}
 
       {#if m.kind === 'keypad'}
+        <rect class="strip" x="0.6" y="2.52" width="2.8" height="0.2" rx="0.05" />
+        <text class="brand" x="2" y="2.655">COOLER MASTER</text>
         {#each Array(15) as _, i}
           {@const [x, y, s] = keyRect(i)}
           {@const src = hub.displays[displayKey(m.serial, i)]}
-          <g class="control" onclick={sel({ kind: 'key', index: i })} role="presentation">
-            <rect x={x - 0.03} y={y - 0.03} width={s + 0.06} height={s + 0.06} rx="0.09" fill="#08080a" />
-            {#if src}
-              <image href={src} x={x} y={y} width={s} height={s} clip-path="url(#key-clip)" preserveAspectRatio="none" />
-            {:else}
-              <rect x={x} y={y} width={s} height={s} rx="0.07" fill="#1e2026" />
-            {/if}
+          {@const selected = isSel({ kind: 'key', index: i })}
+          <g class="control" class:selected onclick={sel({ kind: 'key', index: i })} role="presentation">
+            <rect class="slot" x={x} y={y} width={s} height={s} rx="0.08" />
+            {#if src}<image href={src} x={x} y={y} width={s} height={s} clip-path="url(#key-clip)" preserveAspectRatio="none" />{/if}
+            <rect class="outline" x={x} y={y} width={s} height={s} rx="0.08" />
             {#key flash(m.serial, 'key', i)}
-              {#if flash(m.serial, 'key', i)}<rect class="flash" x={x - 0.02} y={y - 0.02} width={s + 0.04} height={s + 0.04} rx="0.08" />{/if}
+              {#if flash(m.serial, 'key', i)}<rect class="flash" x={x} y={y} width={s} height={s} rx="0.08" />{/if}
             {/key}
-            {#if isSel({ kind: 'key', index: i })}<rect class="sel" x={x - 0.05} y={y - 0.05} width={s + 0.1} height={s + 0.1} rx="0.1" />{/if}
           </g>
         {/each}
-        <rect x="0.55" y="2.5" width="2.9" height="0.26" rx="0.04" fill="#221f1f" pointer-events="none" />
-        <text x="2" y="2.68" class="brand">C O O L E R &nbsp; M A S T E R</text>
       {:else if m.kind === 'dial'}
         {@const src = hub.displays[displayKey(m.serial, TARGET_DIAL)]}
-        <g class="control" onclick={sel({ kind: 'dial' })} role="presentation">
-          <circle cx="1" cy="1" r="0.8" fill="url(#knob)" />
-          {#each Array(48) as _, i}
-            {@const a = (i / 48) * Math.PI * 2}
-            <line x1={1 + 0.72 * Math.cos(a)} y1={1 + 0.72 * Math.sin(a)} x2={1 + 0.8 * Math.cos(a)} y2={1 + 0.8 * Math.sin(a)} stroke="black" stroke-opacity="0.5" stroke-width="0.012" />
+        <g class="control" class:selected={isSel({ kind: 'dial' })} onclick={sel({ kind: 'dial' })} role="presentation">
+          <circle class="ring" cx="1" cy="1" r="0.78" />
+          {#each Array(60) as _, i}
+            {@const a = (i / 60) * Math.PI * 2}
+            <line class="tick" x1={1 + 0.7 * Math.cos(a)} y1={1 + 0.7 * Math.sin(a)} x2={1 + 0.76 * Math.cos(a)} y2={1 + 0.76 * Math.sin(a)} />
           {/each}
-          {#if src}
-            <image href={src} x="0.38" y="0.38" width="1.24" height="1.24" clip-path="url(#round-clip)" />
-          {:else}
-            <circle cx="1" cy="1" r="0.62" fill="#0c0c0e" />
-          {/if}
+          <circle class="slot" cx="1" cy="1" r="0.62" />
+          {#if src}<image href={src} x="0.38" y="0.38" width="1.24" height="1.24" clip-path="url(#round-clip)" />{/if}
+          <circle class="outline" cx="1" cy="1" r="0.78" />
           {#key flash(m.serial, 'dial', 0)}
-            {#if flash(m.serial, 'dial', 0)}<circle class="flash" cx="1" cy="1" r="0.82" />{/if}
+            {#if flash(m.serial, 'dial', 0)}<circle class="flash" cx="1" cy="1" r="0.78" />{/if}
           {/key}
-          {#if isSel({ kind: 'dial' })}<circle class="sel" cx="1" cy="1" r="0.86" />{/if}
         </g>
       {:else if m.kind === 'knob'}
         {#each KNOB_CENTERS as [cx, cy], i}
           {@const led = ledColor('knob', i)}
-          <g class="control" onclick={sel({ kind: 'knob', index: i })} role="presentation">
-            {#if led}<circle cx={cx} cy={cy} r="0.36" fill="none" stroke={led} stroke-width="0.045" filter="url(#glow)" />{/if}
-            {#if led}<circle cx={cx} cy={cy} r="0.36" fill="none" stroke={led} stroke-width="0.03" />{/if}
-            <circle cx={cx} cy={cy} r="0.3" fill="url(#knob)" />
-            <line x1={cx} y1={cy - 0.12} x2={cx} y2={cy - 0.27} stroke="#e8e8e8" stroke-opacity="0.75" stroke-width="0.03" stroke-linecap="round" />
+          <g class="control" class:selected={isSel({ kind: 'knob', index: i })} onclick={sel({ kind: 'knob', index: i })} role="presentation">
+            {#if led}<circle class="led" cx={cx} cy={cy} r="0.355" stroke={led} />{/if}
+            <circle class="cap" cx={cx} cy={cy} r="0.29" />
+            <line class="pointer" x1={cx} y1={cy - 0.11} x2={cx} y2={cy - 0.24} />
+            <circle class="outline" cx={cx} cy={cy} r="0.29" />
             {#key flash(m.serial, 'knob', i)}
-              {#if flash(m.serial, 'knob', i)}<circle class="flash" cx={cx} cy={cy} r="0.4" />{/if}
+              {#if flash(m.serial, 'knob', i)}<circle class="flash" cx={cx} cy={cy} r="0.355" />{/if}
             {/key}
-            {#if isSel({ kind: 'knob', index: i })}<circle class="sel" cx={cx} cy={cy} r="0.44" />{/if}
           </g>
         {/each}
       {:else if m.kind === 'roller'}
         {#each [['left', 0], ['right', 1]] as const as [side, idx]}
           {@const [x, y, rw, rh] = ROLLER_RECTS[side]}
-          <g class="control" onclick={sel({ kind: 'roller', side })} role="presentation">
-            <rect x={x} y={y} width={rw} height={rh} rx="0.1" fill="url(#roller)" />
-            {#each Array(12) as _, k}
-              <line x1={x + 0.1} x2={x + rw - 0.1} y1={y + 0.04 + (k * (rh - 0.08)) / 11} y2={y + 0.04 + (k * (rh - 0.08)) / 11} stroke="black" stroke-opacity="0.35" stroke-width="0.012" />
+          <g class="control" class:selected={isSel({ kind: 'roller', side })} onclick={sel({ kind: 'roller', side })} role="presentation">
+            <rect class="cap" x={x} y={y} width={rw} height={rh} rx={rh / 2} />
+            {#each Array(15) as _, k}
+              {@const lx = x + 0.2 + (k * (rw - 0.4)) / 14}
+              <line class="tick" x1={lx} x2={lx} y1={y + 0.14} y2={y + rh - 0.14} />
             {/each}
+            <rect class="outline" x={x} y={y} width={rw} height={rh} rx={rh / 2} />
             {#key flash(m.serial, 'roller', idx)}
-              {#if flash(m.serial, 'roller', idx)}<rect class="flash" x={x - 0.03} y={y - 0.03} width={rw + 0.06} height={rh + 0.06} rx="0.12" />{/if}
+              {#if flash(m.serial, 'roller', idx)}<rect class="flash" x={x} y={y} width={rw} height={rh} rx={rh / 2} />{/if}
             {/key}
-            {#if isSel({ kind: 'roller', side })}<rect class="sel" x={x - 0.06} y={y - 0.06} width={rw + 0.12} height={rh + 0.12} rx="0.14" />{/if}
           </g>
         {/each}
       {:else if m.kind === 'fader'}
@@ -161,33 +139,26 @@
           {@const x = faderX(i)}
           {@const led = ledColor('fader', i)}
           {@const pos = (hub.faders[`${m.serial}/${i}`] ?? 50) / 100}
-          {@const ky = 1.75 - pos * 1.5}
-          <g class="control" onclick={sel({ kind: 'fader', index: i })} role="presentation">
-            <rect x={x - 0.3} y="0.12" width="0.6" height="1.76" fill="transparent" />
-            {#if led}<line x1={x} y1="0.25" x2={x} y2="1.75" stroke={led} stroke-width="0.1" opacity="0.6" />{/if}
-            <line x1={x} y1="0.25" x2={x} y2="1.75" stroke="black" stroke-width="0.05" />
-            <rect class="fader-cap" x={x - 0.2} y={ky - 0.12} width="0.4" height="0.24" rx="0.05" />
+          {@const ky = 1.7 - pos * 1.4}
+          <g class="control" class:selected={isSel({ kind: 'fader', index: i })} onclick={sel({ kind: 'fader', index: i })} role="presentation">
+            <rect x={x - 0.3} y="0.15" width="0.6" height="1.7" rx="0.12" class="hit" />
+            <line class="track" x1={x} y1="0.3" x2={x} y2="1.7" stroke={led ?? 'currentColor'} />
+            <rect class="cap fader-cap" x={x - 0.17} y={ky - 0.1} width="0.34" height="0.2" rx="0.05" />
+            <rect class="outline" x={x - 0.3} y="0.15" width="0.6" height="1.7" rx="0.12" />
             {#key flash(m.serial, 'fader', i)}
-              {#if flash(m.serial, 'fader', i)}<rect class="flash" x={x - 0.24} y={ky - 0.16} width="0.48" height="0.32" rx="0.07" />{/if}
+              {#if flash(m.serial, 'fader', i)}<rect class="flash" x={x - 0.17} y={ky - 0.1} width="0.34" height="0.2" rx="0.05" />{/if}
             {/key}
-            {#if isSel({ kind: 'fader', index: i })}<rect class="sel" x={x - 0.3} y="0.12" width="0.6" height="1.76" rx="0.1" />{/if}
           </g>
         {/each}
       {/if}
 
       {#if unknown}
-        <rect x="0.02" y="0.02" width={w - 0.04} height={h - 0.04} rx="0.16" fill="none" stroke="#ffbf4d" stroke-width="0.025" stroke-dasharray="0.12 0.08" pointer-events="none" />
-        <text x="0.05" y="-0.12" class="unknown">position unknown (socket {m.socket ?? '?'})</text>
+        <rect class="unknown-outline" x="0.02" y="0.02" width={w - 0.04} height={h - 0.04} rx="0.18" />
+        <text x="0.06" y="-0.14" class="unknown-label">Position unknown · socket {m.socket ?? '?'}</text>
       {/if}
-      {#if isSel({ kind: 'module', serial: m.serial })}
-        <rect class="sel" x="0.04" y="0.04" width={w - 0.08} height={h - 0.08} rx="0.16" />
-      {/if}
+      {#if modSel}<rect class="module-sel" x="0.03" y="0.03" width={w - 0.06} height={h - 0.06} rx="0.2" />{/if}
     </g>
   {/each}
-
-  {#if !hub.modules.some((m) => m.kind === 'base')}
-    <text x={GRID_ROWS / 2} y={GRID_COLS / 2} class="empty">No MasterHUB connected</text>
-  {/if}
 </svg>
 
 <style>
@@ -195,46 +166,142 @@
     width: 100%;
     height: 100%;
     display: block;
+    overflow: visible;
   }
+  .hub :global(*) {
+    vector-effect: non-scaling-stroke;
+  }
+
+  .base {
+    fill: var(--hub-base);
+    stroke: var(--hub-base-stroke);
+    stroke-width: 1;
+    cursor: pointer;
+  }
+  .base-led {
+    fill: none;
+    stroke-width: 6;
+    opacity: 0.22;
+    filter: blur(3px);
+    pointer-events: none;
+  }
+  .socket {
+    fill: var(--text-3);
+    opacity: 0.35;
+    pointer-events: none;
+  }
+  .body {
+    fill: var(--hub-module);
+    stroke: var(--hub-module-stroke);
+    stroke-width: 1;
+    cursor: pointer;
+    transition: stroke 0.15s;
+  }
+  .body:hover {
+    stroke: var(--text-3);
+  }
+
   .control {
     cursor: pointer;
   }
-  .control:hover > :first-child {
-    filter: brightness(1.25);
+  .slot {
+    fill: var(--hub-empty);
   }
-  .sel {
+  .cap {
+    fill: var(--hub-control);
+  }
+  .ring {
+    fill: var(--hub-control);
+  }
+  .outline {
     fill: none;
-    stroke: var(--accent);
-    stroke-width: 0.04;
+    stroke: var(--hub-control-stroke);
+    stroke-width: 1;
+    transition: stroke 0.15s, stroke-width 0.15s;
   }
-  .flash {
+  .hit {
+    fill: transparent;
+  }
+  .tick {
+    stroke: var(--hub-control-stroke);
+    stroke-width: 1;
+  }
+  .pointer {
+    stroke: var(--text-2);
+    stroke-width: 1.5;
+    stroke-linecap: round;
+  }
+  .led {
     fill: none;
-    stroke: var(--glow);
-    stroke-width: 0.05;
-    animation: fade 0.35s ease-out forwards;
+    stroke-width: 2;
+    opacity: 0.9;
   }
-  @keyframes fade {
-    from { opacity: 1; }
-    to { opacity: 0; }
+  .track {
+    stroke-width: 2;
+    stroke-linecap: round;
+    opacity: 0.7;
   }
   .fader-cap {
-    fill: #45454c;
+    stroke: var(--hub-control-stroke);
+    stroke-width: 1;
     transition: y 0.08s linear;
   }
+  .fader-cap + .outline {
+    stroke: transparent;
+  }
+
+  .control:hover .outline {
+    stroke: var(--text-3);
+  }
+  .control.selected .outline,
+  .control.selected .fader-cap + .outline {
+    stroke: var(--accent);
+    stroke-width: 2;
+  }
+
+  .flash {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 3;
+    animation: flash 0.45s ease-out forwards;
+    pointer-events: none;
+  }
+  @keyframes flash {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  .strip {
+    fill: var(--hub-empty);
+    pointer-events: none;
+  }
   .brand {
-    font-size: 0.13px;
-    fill: #d8c0b8;
-    opacity: 0.8;
+    font-size: 0.1px;
+    letter-spacing: 0.02px;
+    font-weight: 600;
+    fill: var(--text-3);
     text-anchor: middle;
     pointer-events: none;
   }
-  .unknown {
-    font-size: 0.16px;
-    fill: #ffbf4d;
+  .module-sel {
+    fill: var(--accent-soft);
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    pointer-events: none;
   }
-  .empty {
-    font-size: 0.3px;
-    fill: var(--fg-dim);
-    text-anchor: middle;
+  .unknown-outline {
+    fill: none;
+    stroke: var(--warning);
+    stroke-width: 1;
+    stroke-dasharray: 4 3;
+    pointer-events: none;
+  }
+  .unknown-label {
+    font-size: 0.15px;
+    fill: var(--warning);
   }
 </style>

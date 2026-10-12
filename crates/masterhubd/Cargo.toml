@@ -12,7 +12,7 @@ env_logger = "0.11.11"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif"] }
 jiff = "0.2.38"
 log = "0.4.34"
-masterhub-core = { version = "0.1.0", path = "../masterhub-core" }
+masterhub-core = { path = "../masterhub-core" }
 masterhub-proto = { path = "../masterhub-proto" }
 nvml-wrapper = "0.13.0"
 serde = "1.0.229"

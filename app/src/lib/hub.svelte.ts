@@ -1,8 +1,7 @@
 // App state: the config being edited, live hub state from the service, and the selection.
 // Edits go through `edit()`, which saves to the service shortly after the last change.
 
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { invoke, listen } from './backend';
 import type { Action, Config, Display, HubState, InputMsg, KeyConfig, ModuleState, Page, Profile, Selection, Snapshot, Side } from './types';
 
 export const hub = $state({

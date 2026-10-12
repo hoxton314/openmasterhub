@@ -2,8 +2,9 @@
 Name=OpenMasterHUB
 Comment=Configure the Cooler Master MasterHUB
 Exec=openmasterhub
-Icon=input-keyboard
+Icon=openmasterhub
 Terminal=false
 Type=Application
 Categories=Settings;HardwareSettings;
-StartupWMClass=org.openmasterhub.OpenMasterHub
+Keywords=MasterHUB;Cooler Master;macro;keypad;stream deck;
+StartupWMClass=openmasterhub
