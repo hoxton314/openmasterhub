@@ -175,7 +175,8 @@ impl Controller {
                 }
             }
             Msg::Input { serial, report } => self.input(&serial, report),
-            Msg::ActiveApp(class) if class == GUI_APP_ID || class.eq_ignore_ascii_case("openmasterhub.exe") => {}
+            // The GUI's own window: GTK uses the app ID, Tauri the binary name (openmasterhub[.exe]).
+            Msg::ActiveApp(class) if class == GUI_APP_ID || class.to_ascii_lowercase().starts_with("openmasterhub") => {}
             Msg::ActiveApp(class) => {
                 let target = self.config.profile_for_app(&class);
                 self.active_app = Some(class);
