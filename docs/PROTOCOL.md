@@ -139,3 +139,5 @@ Feature `0x31` returns `31 14 00…` and feature `0x36` returns `36 10 <5 bytes>
 - **Input** is `01 44 03 00 d0 01 d2`:
   - `d0 = 03` is rotation: `d2 0` = clockwise, `1` = counter-clockwise, about 36 steps per revolution.
   - `d0 = 04` is the button: `d2 1` = down, `0` = up.
+
+**Replug behaviour (verified):** after a USB replug or power cycle, every module returns to hardware mode with its default effects. The keys show the logo animation again and all LEDs go back to colour cycling. Nothing sent with `save=0` persists. The driver must therefore redo the full init on every (re)connect: software mode plus read-back for the M4315 and M131E, all key and dial images, and all LED modes and colours. The udev `uaccess` rule re-applies automatically on re-enumeration.
