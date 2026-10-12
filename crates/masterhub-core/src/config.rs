@@ -528,7 +528,14 @@ fn expand(base: &Path, p: &Path) -> PathBuf {
     if p.is_relative() { base.join(p) } else { p.to_owned() }
 }
 
+/// `%APPDATA%\openmasterhub\config.toml` on Windows.
+#[cfg(windows)]
+pub fn default_path() -> PathBuf {
+    std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")).join("openmasterhub").join("config.toml")
+}
+
 /// `$XDG_CONFIG_HOME/openmasterhub/config.toml`
+#[cfg(not(windows))]
 pub fn default_path() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)

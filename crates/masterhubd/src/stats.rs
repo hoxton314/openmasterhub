@@ -87,10 +87,7 @@ impl Stats {
     }
 
     fn cpu_usage(&mut self) -> Option<f32> {
-        let stat = std::fs::read_to_string("/proc/stat").ok()?;
-        let nums: Vec<u64> = stat.lines().next()?.split_whitespace().skip(1).filter_map(|n| n.parse().ok()).collect();
-        let idle = nums.get(3)? + nums.get(4).unwrap_or(&0);
-        let total: u64 = nums.iter().sum();
+        let (idle, total) = cpu_times()?;
         let prev = self.cpu_prev.replace((idle, total));
         let (pi, pt) = prev?;
         let dt = total.saturating_sub(pt);
@@ -182,6 +179,36 @@ fn gauge(fraction: f32, text: String, caption: &str) -> LiveData {
     LiveData::Gauge { fraction: fraction.clamp(0.0, 1.0), text, caption: caption.to_owned() }
 }
 
+/// Cumulative (idle, total) CPU time since boot.
+#[cfg(not(windows))]
+fn cpu_times() -> Option<(u64, u64)> {
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    let nums: Vec<u64> = stat.lines().next()?.split_whitespace().skip(1).filter_map(|n| n.parse().ok()).collect();
+    let idle = nums.get(3)? + nums.get(4).unwrap_or(&0);
+    Some((idle, nums.iter().sum()))
+}
+
+#[cfg(windows)]
+fn cpu_times() -> Option<(u64, u64)> {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::GetSystemTimes;
+    let ft = |f: FILETIME| ((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64;
+    let zero = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let (mut idle, mut kernel, mut user) = (zero, zero, zero);
+    // SAFETY: valid out-pointers. Kernel time includes idle time.
+    (unsafe { GetSystemTimes(&mut idle, &mut kernel, &mut user) } != 0).then(|| (ft(idle), ft(kernel) + ft(user)))
+}
+
+#[cfg(windows)]
+fn ram_usage() -> Option<f32> {
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    // SAFETY: the struct is plain data; dwLength must be set before the call.
+    let mut m: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+    m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+    (unsafe { GlobalMemoryStatusEx(&mut m) } != 0).then(|| 1.0 - m.ullAvailPhys as f32 / m.ullTotalPhys as f32)
+}
+
+#[cfg(not(windows))]
 fn ram_usage() -> Option<f32> {
     let info = std::fs::read_to_string("/proc/meminfo").ok()?;
     let field = |name: &str| -> Option<f32> {
