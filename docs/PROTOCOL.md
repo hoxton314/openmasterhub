@@ -124,7 +124,7 @@ Feature `0x31` returns `31 14 00…` and feature `0x36` returns `36 10 <5 bytes>
 - The three knobs form a triangle. **k0 = bottom-left, k1 = bottom-right, k2 = top** (the apex).
 - `sub 00` is rotation, one report per detent: `01` = clockwise, `00` = counter-clockwise, `ff` = no movement.
 - `sub 03` is button state: `1` = pressed, `0` = released. A full state is sent on each change.
-- FW 01.00.05.00. The LEDs (group 2, idx 0..2) default to colour cycling; they haven't been tested yet.
+- FW 01.00.05.00. **LEDs confirmed:** group 2, idx 0 = bottom-left, 1 = bottom-right, 2 = top (same order as the input). They default to colour cycling until set (`02 2C 2 idx 1 0` static, `02 2D 2 idx R G B 0`, `02 2E 2 idx 100`).
 
 **Dial (`0206`, M131E, "1xDial w/ IPS, 2x2"):**
 - **Software mode:** SET `03 49 01` and then GET `0x03`. `03 4A` (a +0x10 port from the M4315) is wrong.
