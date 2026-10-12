@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use masterhub_core::config::{Action, Config, Face, Leds, Page, Side, Widget};
-use masterhub_core::dbus::{HubState, INTERFACE, InputMsg, ModuleState, OBJECT_PATH, TARGET_DIAL};
+use masterhub_core::dbus::{GUI_APP_ID, HubState, INTERFACE, InputMsg, ModuleState, OBJECT_PATH, TARGET_DIAL};
 use masterhub_core::layout;
 use masterhub_core::render::{DIAL_SIZE, KEY_SIZE, LiveData, Picture, Renderer, load_picture};
 use masterhub_proto::{
@@ -171,6 +171,7 @@ impl Controller {
                 }
             }
             Msg::Input { serial, report } => self.input(&serial, report),
+            Msg::ActiveApp(class) if class == GUI_APP_ID => {}
             Msg::ActiveApp(class) => {
                 let target = self.config.profile_for_app(&class);
                 self.active_app = Some(class);

@@ -28,6 +28,9 @@ pub const BUS_NAME: &str = "org.openmasterhub.Daemon";
 pub const OBJECT_PATH: &str = "/org/openmasterhub/Daemon";
 pub const INTERFACE: &str = "org.openmasterhub.Daemon1";
 pub const TARGET_DIAL: u8 = 255;
+/// Application ID (and Wayland app_id / window class) of the GUI. Focusing it does not
+/// switch profiles, so a profile can be edited while another app was focused before.
+pub const GUI_APP_ID: &str = "org.openmasterhub.OpenMasterHub";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModuleState {
