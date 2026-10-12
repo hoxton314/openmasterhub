@@ -81,7 +81,7 @@ Detailed specs:
 - Some feature GETs return 0 bytes before software mode is entered. After it, they all work:
   - `0x37`: bootloader version, `[37 0f crc:4 "02.00.00.00"]`
   - `0x38`/`0x39`: firmware version, `"02.00.01.00"`
-  - `0x3A`: serial number, `[3a 14 "MHKD15AA431251602222"]`
+  - `0x3A`: serial number, `[3a 14 "MHKD15xxxxxxxxxxxxxx"] (20-character serial)`
   - `0x3B`: device info, `3b 0b 14 03 05 0f e0 01 10 01 01 48 48`. Byte 3 is rows = 3, byte 4 cols = 5, byte 5 keys = 15. Bytes 6..7 give the screen width, 480 (u16 LE), and bytes 8..9 the height, 272. Bytes 11 and 12 are the key image width and height, 72×72.
   - `0x3C`: backlight, `[3c 01 <0..100>]`
 
