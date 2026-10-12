@@ -1,0 +1,19 @@
+[package]
+name = "openmasterhub"
+description = "Desktop app for the Cooler Master MasterHUB"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+async-channel = "2.5.0"
+env_logger = "0.11.11"
+gtk4 = { version = "0.11.5", features = ["v4_18"] }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+libadwaita = { version = "0.9.2", features = ["v1_7"] }
+log = "0.4.34"
+masterhub-core = { path = "../masterhub-core" }
+masterhub-proto = { version = "0.1.0", path = "../masterhub-proto" }
+serde_json = "1.0.154"
+zbus = "5.19.0"

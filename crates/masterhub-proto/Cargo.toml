@@ -1,0 +1,8 @@
+[package]
+name = "masterhub-proto"
+description = "Wire protocol for Cooler Master MasterHUB modules (no I/O)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

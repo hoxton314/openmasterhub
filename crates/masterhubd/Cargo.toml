@@ -1,0 +1,22 @@
+[package]
+name = "masterhubd"
+description = "Linux service for the Cooler Master MasterHUB"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow = "1.0.104"
+ctrlc = { version = "3.5.2", features = ["termination"] }
+env_logger = "0.11.11"
+evdev = "0.13.2"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif"] }
+jiff = "0.2.38"
+libc = "0.2.190"
+log = "0.4.34"
+masterhub-core = { version = "0.1.0", path = "../masterhub-core" }
+masterhub-proto = { path = "../masterhub-proto" }
+nvml-wrapper = "0.13.0"
+serde = "1.0.229"
+serde_json = "1.0.154"
+zbus = "5.19.0"

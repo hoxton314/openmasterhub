@@ -1,0 +1,17 @@
+[package]
+name = "masterhub-core"
+description = "Shared config model, layout and rendering for openmasterhub"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ab_glyph = "0.2.32"
+anyhow = "1.0.104"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif"] }
+jiff = "0.2.38"
+log = "0.4.34"
+masterhub-proto = { path = "../masterhub-proto" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+toml = "1.1.8"

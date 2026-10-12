@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=OpenMasterHUB
+Comment=Configure the Cooler Master MasterHUB
+Exec=openmasterhub
+Icon=input-keyboard
+Terminal=false
+Type=Application
+Categories=Settings;HardwareSettings;
+StartupWMClass=org.openmasterhub.OpenMasterHub

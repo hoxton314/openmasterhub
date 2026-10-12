@@ -1,0 +1,12 @@
+[Unit]
+Description=OpenMasterHUB service for the Cooler Master MasterHUB
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.cargo/bin/masterhubd
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+members = ["crates/masterhub-proto", "crates/masterhub-core", "crates/masterhubd", "crates/openmasterhub"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
