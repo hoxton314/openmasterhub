@@ -1,5 +1,5 @@
 //! The controller owns all hub state (profile, page, folder stack, what every display shows)
-//! and is the only place that decides what happens on input. Workers do I/O, the D-Bus API
+//! and is the only place that decides what happens on input. Workers do I/O, the IPC server
 //! reads the shared [`Snapshot`].
 
 use std::collections::{BTreeMap, HashMap};
@@ -29,13 +29,13 @@ pub enum Msg {
     Disconnected { serial: String },
     Input { serial: String, report: InputReport },
     ActiveApp(String),
-    /// A validated config from the D-Bus API (already saved to disk) with its TOML text.
+    /// A validated config from the app (IPC) (already saved to disk) with its TOML text.
     ApplyConfig { config: Box<Config>, text: String },
     SetProfile(String),
     ShowPage(String),
 }
 
-/// State shared with the D-Bus API.
+/// State shared with the IPC server.
 #[derive(Default)]
 pub struct Snapshot {
     pub config: Config,

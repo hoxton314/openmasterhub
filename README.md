@@ -11,8 +11,8 @@ Supported modules (all verified on hardware): Base, 15-key IPS keypad, 5 faders,
 | Crate | What it is |
 |---|---|
 | `masterhub-proto` | Wire protocol: command encoding and input decoding, no I/O |
-| `masterhub-core` | Config model, Base slot layout, face/widget rendering, D-Bus contract |
-| `masterhubd` | Background service: drives the hardware over hidraw, profiles/pages/folders, live widgets, per-app profiles (Hyprland), D-Bus API |
+| `masterhub-core` | Config model, Base slot layout, face/widget rendering, IPC protocol and client |
+| `masterhubd` | Background service: drives the hardware over hidraw, profiles/pages/folders, live widgets, per-app profiles (Hyprland on Linux, focused program on Windows), local IPC for the app |
 | `app/` (`openmasterhub`) | Tauri desktop app (Svelte UI): live picture of your hub, click-to-configure editor |
 
 Protocol documentation: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) and `docs/protocol-*.md`.
