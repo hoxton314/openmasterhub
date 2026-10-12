@@ -38,9 +38,21 @@ fn footprint(kind: ModuleKind) -> (f64, f64) {
 pub fn draw(model: &Model, cr: &Context, width: f64, height: f64) -> Vec<Hit> {
     // Rotation-only view: Base vertical frame (cells) → view frame (cells).
     let mut view = Matrix::identity();
-    if model.hub.horizontal {
-        view.translate(GRID_ROWS as f64, 0.0);
-        view.rotate(PI / 2.0);
+    let (cols, rows) = (GRID_COLS as f64, GRID_ROWS as f64);
+    match model.hub.rotation {
+        90 => {
+            view.translate(rows, 0.0);
+            view.rotate(PI / 2.0);
+        }
+        180 => {
+            view.translate(cols, rows);
+            view.rotate(PI);
+        }
+        270 => {
+            view.translate(0.0, cols);
+            view.rotate(-PI / 2.0);
+        }
+        _ => {}
     }
 
     // Base first, then modules on top of it.

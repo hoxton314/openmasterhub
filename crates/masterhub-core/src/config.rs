@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use masterhub_proto::Rgb;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// TTF/OTF font for labels. Defaults to `fc-match sans:bold`.
@@ -21,37 +21,84 @@ pub struct Config {
     /// How the Base is placed on the desk. `auto` follows its tilt sensor.
     #[serde(default, skip_serializing_if = "Orientation::is_auto")]
     pub orientation: Orientation,
+    /// Turn key and dial images so they read upright from the user's side, whatever way the
+    /// Base and the modules are rotated.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub upright: bool,
     /// The first profile is the default; it is used when no other profile matches the
     /// focused application.
     #[serde(default, rename = "profile", skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<Profile>,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            font: None,
+            backlight: default_backlight(),
+            leds: Leds::default(),
+            orientation: Orientation::Auto,
+            upright: true,
+            profiles: Vec::new(),
+        }
+    }
+}
+
 fn default_backlight() -> u8 {
     80
 }
 
+fn yes() -> bool {
+    true
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
+/// How the Base lies on the desk, as seen by the user.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum Orientation {
-    /// Follow the Base's sensor; landscape until it reports.
+    /// Follow the Base's tilt sensor when it reports; landscape until then.
     #[default]
     Auto,
-    Landscape,
     Portrait,
+    Landscape,
+    PortraitFlipped,
+    LandscapeFlipped,
 }
 
 impl Orientation {
+    pub const ALL: [Orientation; 5] =
+        [Self::Auto, Self::Portrait, Self::Landscape, Self::PortraitFlipped, Self::LandscapeFlipped];
+
     pub fn is_auto(&self) -> bool {
         *self == Self::Auto
     }
 
-    /// Resolve to "is the Base horizontal (landscape)?".
-    pub fn horizontal(self, sensor: Option<bool>) -> bool {
+    pub fn title(self) -> &'static str {
         match self {
-            Self::Landscape => true,
-            Self::Portrait => false,
-            Self::Auto => sensor.unwrap_or(true),
+            Self::Auto => "Automatic",
+            Self::Portrait => "Portrait",
+            Self::Landscape => "Landscape",
+            Self::PortraitFlipped => "Portrait, upside down",
+            Self::LandscapeFlipped => "Landscape, upside down",
+        }
+    }
+
+    /// Clockwise rotation (0/90/180/270) from the Base's vertical frame to the user's view.
+    /// `sensor` is the Base's "horizontal" report, if it sent one.
+    pub fn rotation(self, sensor: Option<bool>) -> u16 {
+        match self {
+            Self::Portrait => 0,
+            Self::Landscape => 90,
+            Self::PortraitFlipped => 180,
+            Self::LandscapeFlipped => 270,
+            Self::Auto => match sensor {
+                Some(false) => 0,
+                _ => 90,
+            },
         }
     }
 }

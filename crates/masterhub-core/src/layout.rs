@@ -7,8 +7,8 @@
 //! + orientation its cells follow, including placements that overhang the Base.
 //!
 //! The pad/pin geometry was fitted to the vendor app's per-socket CSS tables (all entries
-//! agree except a few the docs already flag as sloppy) and checked against five real
-//! arrangements on hardware; pad "34" was measured on hardware. Coordinates are in half cells to stay exact.
+//! agree except a few sloppy CSS entries) and checked against six real arrangements on
+//! hardware; pads "34" and "121" were measured on hardware. Coordinates are in half cells to stay exact.
 
 use masterhub_proto::ModuleKind;
 use serde::{Deserialize, Serialize};
@@ -60,7 +60,8 @@ const PADS: &[(&str, i8, i8, u16)] = &[
     ("112", 5, 2, 270),
     ("113", 8, 1, 0),
     ("114", 6, 7, 180),
-    ("121", 4, 5, 0),
+    // Measured on hardware (fader, arrangement 6); agrees with the vendor's roller entry.
+    ("121", 5, 10, 270),
     ("122", 8, 9, 0),
     ("123", 4, 9, 0),
     ("124", 1, 8, 270),
@@ -86,6 +87,12 @@ const PADS: &[(&str, i8, i8, u16)] = &[
     ("44", 5, 8, 270),
     // "144" is the Base MCU itself.
 ];
+
+/// How far (clockwise) to turn a module's screen images so they read upright for the user,
+/// given the module's rotation on the Base and the Base's rotation on the desk.
+pub fn upright_turn(module_rotation: u16, base_rotation: u16) -> u16 {
+    (360 - (module_rotation + base_rotation) % 360) % 360
+}
 
 /// The socket a module is plugged into: its USB port path below the Base's top hub as a digit
 /// string ("22", "134", …). `module_ports` and `base_ports` are the dotted port lists from
@@ -243,6 +250,25 @@ mod tests {
         assert_eq!(free(&grid), vec![(0, 0), (2, 0), (0, 1), (2, 1), (0, 2), (1, 2)]);
     }
 
+    #[test]
+    fn arrangement_6_fader_below() {
+        // Base upside down in portrait: keypad at the top of the Base frame, fader hanging off
+        // the bottom edge.
+        let grid = tile(&[(ModuleKind::Keypad, "24"), (ModuleKind::Fader, "121")]);
+        assert_eq!(at(ModuleKind::Fader, "121"), (2, 5, 270));
+        assert_eq!(free(&grid).len(), 4 * 6 - 12 - 2);
+    }
+
+    #[test]
+    fn upright_turns_match_photos() {
+        // Keypad at "24" on a Base lying portrait upside down: keys looked upside down.
+        assert_eq!(upright_turn(place(ModuleKind::Keypad, "24").unwrap().rotation, 180), 180);
+        // Dial at "133" on a landscape Base: its text read bottom-to-top (turned 270°).
+        assert_eq!(upright_turn(place(ModuleKind::Dial, "133").unwrap().rotation, 90), 90);
+        // Keypad at "22" on a landscape Base was already upright.
+        assert_eq!(upright_turn(place(ModuleKind::Keypad, "22").unwrap().rotation, 90), 0);
+    }
+
     /// The vendor app's CSS tables (docs/app-architecture.md §2.3): the model must reproduce
     /// them, except a few entries that the doc already flags as sloppy.
     #[test]
@@ -255,7 +281,8 @@ mod tests {
             (ModuleKind::Roller, &[("134", 0, 3, 0, 0, 0), ("112", 0, 3, 1, 1, 0), ("23", 0, 3, 2, 2, 0), ("43", 0, 3, 3, 3, 0), ("44", 0, 3, 4, 4, 0), ("121", 0, 3, 5, 5, 0), ("31", 1, 1, 0, 3, 90), ("42", 3, 3, 0, 3, 90), ("123", 1, 1, 2, 5, 90), ("122", 3, 3, 2, 5, 90), ("141", 0, 0, 0, 3, 270), ("142", 1, 1, 0, 3, 270), ("124", 2, 2, 0, 3, 270), ("131", 2, 2, 0, 3, 270), ("133", 3, 3, 0, 3, 270), ("33", 0, 0, 2, 5, 270), ("32", 1, 1, 2, 5, 270), ("21", 2, 2, 2, 5, 270), ("114", 3, 3, 2, 5, 270)]),
         ];
         // Sloppy vendor CSS: duplicated/odd offsets noted in the doc.
-        let known_bad = [(ModuleKind::Fader, "31"), (ModuleKind::Fader, "32"), (ModuleKind::Roller, "121"), (ModuleKind::Roller, "124")];
+        // The knob/dial "121" entry contradicts hardware (arrangement 6) and the roller entry.
+        let known_bad = [(ModuleKind::Fader, "31"), (ModuleKind::Fader, "32"), (ModuleKind::Knob, "121"), (ModuleKind::Roller, "124")];
         for (kind, table) in vendor {
             for &(s, c0, _, r0, _, rot) in table {
                 if known_bad.contains(&(kind, s)) {

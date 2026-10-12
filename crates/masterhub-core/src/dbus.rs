@@ -49,8 +49,11 @@ pub struct HubState {
     /// Name of the keypad page or folder on screen.
     pub page: String,
     pub in_folder: bool,
-    /// Base orientation reported by its sensor.
+    /// Base orientation: true when lying landscape.
     pub horizontal: bool,
+    /// Clockwise rotation (0/90/180/270) from the Base's vertical frame to the user's view.
+    #[serde(default)]
+    pub rotation: u16,
     /// Window class of the focused app (Hyprland), if known.
     pub active_app: Option<String>,
 }
