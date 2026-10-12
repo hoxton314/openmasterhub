@@ -10,3 +10,6 @@
    `type $env:USERPROFILE\masterhub-actions.log`. The top knob changes the Windows volume.
 
 In a VM the Base's internal hubs are not visible, so module placement is unknown there.
+
+After replugging the MasterHUB, the modules return to Linux; hand them back to the VM with
+`tools/vm/reattach.sh`.
