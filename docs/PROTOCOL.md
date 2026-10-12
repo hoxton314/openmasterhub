@@ -149,3 +149,14 @@ Feature `0x31` returns `31 14 00…` and feature `0x36` returns `36 10 <5 bytes>
 - **A host driver must therefore never send hardware mode.** `masterhubd` blanks the screens on exit instead.
 
 **How to tell whether software mode took effect:** GET `0x03` returns 32 bytes (`03 00 …`) right after the SET. A 0-byte reply means the command was ignored.
+
+## Windows (verified 2026-10-13, Windows 11 VM with USB passthrough)
+
+`masterhubd.exe` (hidapi native backend) works the same as on Linux:
+- discovery, software mode and read-back, images, LEDs
+- input and actions, including `SendInput` media keys
+- config hot reload
+
+Windows HID detail: a feature GET that a module answers with zero bytes is reported by Windows as an error rather than as 0 bytes, so `command()` treats that as an empty read-back.
+
+Not yet verified: socket detection from `DEVPKEY_Device_LocationPaths`. A VM only sees the passed-through HID devices, not the Base's internal hubs, so this needs a real Windows PC.

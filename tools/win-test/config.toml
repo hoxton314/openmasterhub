@@ -1,0 +1,140 @@
+# Windows test config for masterhubd (see tools/win-test/README.md).
+backlight = 80
+# A VM cannot see the Base's internal USB hubs, so placement is unknown: keep images unrotated.
+upright = false
+
+[leds]
+base = "#00ffff"
+knob = ["#ff0000", "#00ff00", "#0000ff"]
+fader = ["#ff0000", "#ff8000", "#ffff00", "#00ff00", "#0080ff"]
+
+[[profile]]
+name = "Default"
+
+[[profile.page]]
+name = "Main"
+
+[[profile.page.key]]
+index = 0
+label = "W0"
+background = "#c0392b"
+press = { cmd = 'echo key 0 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 1
+label = "W1"
+background = "#c0392b"
+press = { cmd = 'echo key 1 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 2
+label = "W2"
+background = "#c0392b"
+press = { cmd = 'echo key 2 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 3
+label = "W3"
+background = "#d35400"
+press = { cmd = 'echo key 3 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 4
+label = "W4"
+background = "#d35400"
+press = { cmd = 'echo key 4 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 5
+widget = { kind = "cpu_usage" }
+press = { cmd = 'echo key 5 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 6
+widget = { kind = "ram_usage" }
+press = { cmd = 'echo key 6 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 7
+widget = { kind = "clock" }
+press = { cmd = 'echo key 7 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 8
+label = "W8"
+background = "#f39c12"
+press = { cmd = 'echo key 8 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 9
+label = "W9"
+background = "#27ae60"
+press = { cmd = 'echo key 9 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 10
+label = "W10"
+background = "#27ae60"
+press = { cmd = 'echo key 10 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 11
+label = "W11"
+background = "#27ae60"
+press = { cmd = 'echo key 11 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 12
+label = "W12"
+background = "#2980b9"
+press = { cmd = 'echo key 12 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 13
+label = "W13"
+background = "#2980b9"
+press = { cmd = 'echo key 13 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.page.key]]
+index = 14
+label = "W14"
+background = "#2980b9"
+press = { cmd = 'echo key 14 down >> %USERPROFILE%\masterhub-actions.log' }
+
+[profile.dial]
+label = "Windows"
+background = "#0078d4"
+widget = { kind = "volume" }
+cw = { keys = "volumeup" }
+ccw = { keys = "volumedown" }
+press = { keys = "mute" }
+
+[[profile.knob]]
+index = 2
+cw = { keys = "volumeup" }
+ccw = { keys = "volumedown" }
+press = { keys = "mute" }
+
+[[profile.knob]]
+index = 0
+cw = { cmd = 'echo knob 0 cw >> %USERPROFILE%\masterhub-actions.log' }
+ccw = { cmd = 'echo knob 0 ccw >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.knob]]
+index = 1
+cw = { cmd = 'echo knob 1 cw >> %USERPROFILE%\masterhub-actions.log' }
+ccw = { cmd = 'echo knob 1 ccw >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.roller]]
+side = "left"
+away = { cmd = 'echo roller left away >> %USERPROFILE%\masterhub-actions.log' }
+toward = { cmd = 'echo roller left toward >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.roller]]
+side = "right"
+away = { cmd = 'echo roller right away >> %USERPROFILE%\masterhub-actions.log' }
+toward = { cmd = 'echo roller right toward >> %USERPROFILE%\masterhub-actions.log' }
+
+[[profile.fader]]
+index = 0
+change = { cmd = 'echo fader 0 = {value} >> %USERPROFILE%\masterhub-actions.log' }
