@@ -137,9 +137,16 @@ impl Renderer {
         img
     }
 
-    /// Render and encode as the baseline JFIF JPEG the modules expect.
-    pub fn render(&self, face: &Face, size: u32, picture: Option<&RgbaImage>, live: Option<&LiveData>) -> Result<Vec<u8>> {
+    /// Render and encode as the baseline JFIF JPEG the modules expect, turned clockwise by
+    /// `turn` degrees (0/90/180/270) so it reads upright on a rotated module.
+    pub fn render(&self, face: &Face, size: u32, picture: Option<&RgbaImage>, live: Option<&LiveData>, turn: u16) -> Result<Vec<u8>> {
         let img = self.render_rgb(face, size, picture, live);
+        let img = match turn % 360 {
+            90 => image::imageops::rotate90(&img),
+            180 => image::imageops::rotate180(&img),
+            270 => image::imageops::rotate270(&img),
+            _ => img,
+        };
         let mut out = Vec::new();
         JpegEncoder::new_with_quality(&mut out, 85).encode_image(&img)?;
         Ok(out)
@@ -264,7 +271,7 @@ mod tests {
     fn renders_baseline_jpeg_of_right_size() {
         let r = Renderer { font: None };
         let face = Face { label: Some("x".into()), ..Default::default() };
-        let jpeg = r.render(&face, KEY_SIZE, None, None).unwrap();
+        let jpeg = r.render(&face, KEY_SIZE, None, None, 90).unwrap();
         // JFIF header the firmware checks for.
         assert_eq!(&jpeg[..4], &[0xFF, 0xD8, 0xFF, 0xE0]);
         let decoded = image::load_from_memory(&jpeg).unwrap();

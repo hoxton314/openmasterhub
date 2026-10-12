@@ -54,6 +54,8 @@ struct Module {
     faders: Option<[u8; 5]>,
     /// What each display target currently shows.
     shown: HashMap<u8, Arc<Vec<u8>>>,
+    /// Where the module sits on the Base, once the Base is known.
+    placement: Option<layout::Placement>,
 }
 
 struct Anim {
@@ -71,7 +73,8 @@ pub struct Controller {
     profile: usize,
     page: usize,
     folders: Vec<String>,
-    horizontal: bool,
+    /// Last orientation reported by the Base's sensor, if any.
+    sensor_horizontal: Option<bool>,
     active_app: Option<String>,
     anims: HashMap<(String, u8), Anim>,
     stats: Stats,
@@ -108,7 +111,7 @@ impl Controller {
             profile: 0,
             page: 0,
             folders: Vec::new(),
-            horizontal: false,
+            sensor_horizontal: None,
             active_app: None,
             anims: HashMap::new(),
             stats: Stats::new(),
@@ -157,6 +160,7 @@ impl Controller {
                         knob_buttons: KeyTracker::default(),
                         faders: None,
                         shown: HashMap::new(),
+                        placement: None,
                     },
                 );
                 self.init_module(&serial);
@@ -432,7 +436,8 @@ impl Controller {
             None => None,
         };
         let live = face.widget.as_ref().and_then(|w| self.live.get(w));
-        let jpeg = match self.renderer.render(&face, size, frame, live) {
+        let turn = self.turn_for(serial);
+        let jpeg = match self.renderer.render(&face, size, frame, live, turn) {
             Ok(j) => Arc::new(j),
             Err(e) => {
                 log::error!("rendering: {e:#}");
@@ -448,6 +453,16 @@ impl Controller {
         let _ = m.tx.send(DeviceCmd::Image { target: it, jpeg: jpeg.clone() });
         self.snapshot.lock().unwrap().displays.insert((serial.to_owned(), target), jpeg.clone());
         self.emit("DisplayChanged", &(serial, target, jpeg.as_slice()));
+    }
+
+    /// How far to turn a module's images (clockwise) so they read upright for the user: the
+    /// inverse of the module's rotation on the Base plus the Base's rotation on the desk.
+    fn turn_for(&self, serial: &str) -> u16 {
+        if !self.config.upright {
+            return 0;
+        }
+        let module = self.modules.get(serial).and_then(|m| m.placement).map_or(0, |p| p.rotation);
+        layout::upright_turn(module, self.config.orientation.rotation(self.sensor_horizontal))
     }
 
     fn advance_animations(&mut self, now: Instant) {
@@ -540,9 +555,12 @@ impl Controller {
             InputReport::DialTurn(r) => events.push(("dial", 0, if r == Rotation::Clockwise { "cw" } else { "ccw" }, None)),
             InputReport::DialButton { pressed } => events.push(("dial", 0, if pressed { "down" } else { "up" }, None)),
             InputReport::BaseOrientation { horizontal } => {
-                if horizontal != self.horizontal {
-                    self.horizontal = horizontal;
+                if self.sensor_horizontal != Some(horizontal) {
+                    log::info!("Base tilt sensor: {}", if horizontal { "landscape" } else { "portrait" });
+                    self.sensor_horizontal = Some(horizontal);
                     self.publish_state();
+                    // Turn the screens to the new orientation.
+                    self.refresh_all();
                 }
             }
             InputReport::Unknown { .. } => {}
@@ -611,7 +629,8 @@ impl Controller {
             profile: self.profile_name().unwrap_or_default().to_owned(),
             page: self.page_ref().map(|p| p.name.clone()).unwrap_or_default(),
             in_folder: !self.folders.is_empty(),
-            horizontal: self.horizontal,
+            horizontal: self.config.orientation.rotation(self.sensor_horizontal) % 180 == 90,
+            rotation: self.config.orientation.rotation(self.sensor_horizontal),
             active_app: self.active_app.clone(),
         };
         let json = serde_json::to_string(&state).unwrap_or_default();
@@ -626,7 +645,7 @@ impl Controller {
         }
     }
 
-    fn publish_modules(&self) {
+    fn publish_modules(&mut self) {
         let base_ports = self
             .modules
             .values()
@@ -651,8 +670,20 @@ impl Controller {
             })
             .collect();
         let json = serde_json::to_string(&modules).unwrap_or_default();
+        let mut moved = false;
+        for ms in &modules {
+            if let Some(m) = self.modules.get_mut(&ms.serial)
+                && m.placement != ms.placement
+            {
+                m.placement = ms.placement;
+                moved = true;
+            }
+        }
         self.snapshot.lock().unwrap().modules = modules;
         self.emit("ModulesChanged", &(json,));
+        if moved {
+            self.refresh_all();
+        }
     }
 
     fn emit<B: serde::Serialize + zbus::zvariant::DynamicType>(&self, signal: &str, body: &B) {

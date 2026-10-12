@@ -215,7 +215,7 @@ fn preview_texture(renderer: &Renderer, face: &Face) -> Option<gtk::gdk::Texture
         Widget::NowPlaying => LiveData::Media { title: "Song title".into(), artist: "Artist".into(), art: None },
         other => LiveData::Gauge { fraction: 0.42, text: "42".into(), caption: other.title().split(' ').next().unwrap_or("").to_owned() },
     });
-    let jpeg = renderer.render(face, KEY_SIZE, frame, live.as_ref()).ok()?;
+    let jpeg = renderer.render(face, KEY_SIZE, frame, live.as_ref(), 0).ok()?;
     gtk::gdk::Texture::from_bytes(&gtk::glib::Bytes::from_owned(jpeg)).ok()
 }
 
@@ -418,6 +418,36 @@ fn module_groups(app: &Rc<App>, serial: &str) -> Vec<adw::PreferencesGroup> {
         info.add(&row);
     }
     groups.push(info);
+
+    if module.kind == "base" {
+        use masterhub_core::config::Orientation;
+        let g = adw::PreferencesGroup::builder().title("Placement").build();
+        let row = adw::ComboRow::builder()
+            .title("Orientation")
+            .subtitle("How the Base lies on your desk. Automatic uses its tilt sensor when it reports.")
+            .model(&gtk::StringList::new(&Orientation::ALL.map(|o| o.title())))
+            .build();
+        let current = app.model.borrow().config.orientation;
+        row.set_selected(Orientation::ALL.iter().position(|o| *o == current).unwrap_or(0) as u32);
+        let a = app.clone();
+        row.connect_selected_notify(move |r| {
+            let o = Orientation::ALL.get(r.selected() as usize).copied().unwrap_or_default();
+            a.edit(|m| m.config.orientation = o);
+        });
+        g.add(&row);
+        let upright = adw::SwitchRow::builder()
+            .title("Keep screens upright")
+            .subtitle("Turn key and dial images to read upright from your side")
+            .active(app.model.borrow().config.upright)
+            .build();
+        let a = app.clone();
+        upright.connect_active_notify(move |r| {
+            let on = r.is_active();
+            a.edit(|m| m.config.upright = on);
+        });
+        g.add(&upright);
+        groups.push(g);
+    }
 
     let led_count = match module.kind.as_str() {
         "base" => 1,

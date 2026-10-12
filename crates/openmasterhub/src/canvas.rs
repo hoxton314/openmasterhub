@@ -8,7 +8,7 @@ use std::f64::consts::PI;
 use gtk4::cairo::{self, Context, Matrix};
 use masterhub_core::config::{OneOrMany, Side};
 use masterhub_core::dbus::{ModuleState, TARGET_DIAL};
-use masterhub_core::layout::{GRID_COLS, GRID_ROWS, Placement};
+use masterhub_core::layout::{BASE_PLACEMENT, GRID_COLS, GRID_ROWS, Placement};
 use masterhub_proto::{ModuleKind, Rgb};
 
 use crate::model::{Model, Selection};
@@ -36,38 +36,71 @@ fn footprint(kind: ModuleKind) -> (f64, f64) {
 }
 
 pub fn draw(model: &Model, cr: &Context, width: f64, height: f64) -> Vec<Hit> {
-    let horizontal = model.hub.horizontal;
-    let (gw, gh) = if horizontal { (GRID_ROWS as f64, GRID_COLS as f64) } else { (GRID_COLS as f64, GRID_ROWS as f64) };
-    let margin = 24.0;
-    let cell = ((width - 2.0 * margin) / gw).min((height - 2.0 * margin) / gh).max(10.0);
-    let (ox, oy) = ((width - cell * gw) / 2.0, (height - cell * gh) / 2.0);
-
-    // View transform: Base vertical frame (cells) → widget pixels.
+    // Rotation-only view: Base vertical frame (cells) → view frame (cells).
     let mut view = Matrix::identity();
-    view.translate(ox, oy);
-    view.scale(cell, cell);
-    if horizontal {
-        view.translate(GRID_ROWS as f64, 0.0);
-        view.rotate(PI / 2.0);
+    let (cols, rows) = (GRID_COLS as f64, GRID_ROWS as f64);
+    match model.hub.rotation {
+        90 => {
+            view.translate(rows, 0.0);
+            view.rotate(PI / 2.0);
+        }
+        180 => {
+            view.translate(cols, rows);
+            view.rotate(PI);
+        }
+        270 => {
+            view.translate(0.0, cols);
+            view.rotate(-PI / 2.0);
+        }
+        _ => {}
     }
 
-    let mut hits = Vec::new();
     // Base first, then modules on top of it.
-    let mut modules: Vec<&ModuleState> = model.modules.iter().collect();
-    modules.sort_by_key(|m| m.kind != "base");
-    let base_led = led_color(model, ModuleKind::Base, 0);
+    let mut modules: Vec<(&ModuleState, ModuleKind)> = model.modules.iter().filter_map(|m| Some((m, kind_of(m)?))).collect();
+    modules.sort_by_key(|(m, _)| m.kind != "base");
 
-    for m in modules {
-        let Some(kind) = kind_of(m) else { continue };
-        let placement = match m.placement {
-            Some(p) => p,
-            None if kind == ModuleKind::Base => Placement { col: 0, row: 0, cols: GRID_COLS, rows: GRID_ROWS, rotation: 0 },
-            None => continue, // not on a Base or unknown socket
-        };
-        let matrix = module_matrix(&view, placement, kind);
+    // Modules at a known socket go where they sit (possibly overhanging the Base); modules at
+    // an unknown socket go to a tray below, so they can still be seen and configured.
+    let mut placed: Vec<(&ModuleState, ModuleKind, Matrix)> = Vec::new();
+    let mut tray: Vec<(&ModuleState, ModuleKind)> = Vec::new();
+    for &(m, kind) in &modules {
+        match m.placement.or((kind == ModuleKind::Base).then_some(BASE_PLACEMENT)) {
+            Some(p) => placed.push((m, kind, module_matrix(&view, p, kind))),
+            None => tray.push((m, kind)),
+        }
+    }
+    let mut bbox = BBox::default();
+    for (_, kind, matrix) in &placed {
+        bbox.add_rect(matrix, footprint(*kind));
+    }
+    if bbox.is_empty() {
+        bbox.add_rect(&view, (GRID_COLS as f64, GRID_ROWS as f64));
+    }
+    let (mut tx, ty) = (bbox.x0, bbox.y1 + 0.7);
+    for (m, kind) in &tray {
+        let mut matrix = Matrix::identity();
+        matrix.translate(tx, ty);
+        bbox.add_rect(&matrix, footprint(*kind));
+        tx += footprint(*kind).0 + 0.3;
+        placed.push((m, *kind, matrix));
+    }
+
+    // Fit everything into the widget.
+    let margin = 24.0;
+    let (bw, bh) = (bbox.x1 - bbox.x0, bbox.y1 - bbox.y0);
+    let cell = ((width - 2.0 * margin) / bw).min((height - 2.0 * margin) / bh).max(10.0);
+    let mut fit = Matrix::identity();
+    fit.translate((width - cell * bw) / 2.0, (height - cell * bh) / 2.0);
+    fit.scale(cell, cell);
+    fit.translate(-bbox.x0, -bbox.y0);
+
+    let base_led = led_color(model, ModuleKind::Base, 0);
+    let mut hits = Vec::new();
+    let in_tray = placed.len() - tray.len();
+    for (i, (m, kind, matrix)) in placed.into_iter().enumerate() {
+        let matrix = Matrix::multiply(&matrix, &fit);
         cr.save().ok();
         cr.set_matrix(matrix);
-        let selected_module = model.selection == Selection::Module(m.serial.clone());
         match kind {
             ModuleKind::Base => draw_base(cr, base_led),
             ModuleKind::Keypad => draw_keypad(cr, model, m),
@@ -76,7 +109,21 @@ pub fn draw(model: &Model, cr: &Context, width: f64, height: f64) -> Vec<Hit> {
             ModuleKind::Roller => draw_roller(cr, model, m),
             ModuleKind::Fader => draw_fader(cr, model, m),
         }
-        if selected_module {
+        if i >= in_tray {
+            // Dashed outline and the socket, so it is clear the position is unknown.
+            let (w, h) = footprint(kind);
+            rounded(cr, 0.02, 0.02, w - 0.04, h - 0.04, 0.16);
+            cr.set_dash(&[0.12, 0.08], 0.0);
+            stroke_color(cr, (1.0, 0.75, 0.3), 0.8, 0.025);
+            cr.set_dash(&[], 0.0);
+            cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
+            cr.set_font_size(0.16);
+            cr.set_source_rgba(1.0, 0.75, 0.3, 0.9);
+            cr.move_to(0.05, -0.12);
+            let socket = m.socket.as_deref().unwrap_or("?");
+            cr.show_text(&format!("position unknown (socket {socket})")).ok();
+        }
+        if model.selection == Selection::Module(m.serial.clone()) {
             let (w, h) = footprint(kind);
             rounded(cr, 0.04, 0.04, w - 0.08, h - 0.08, 0.16);
             stroke_color(cr, ACCENT, 1.0, 0.05);
@@ -90,12 +137,42 @@ pub fn draw(model: &Model, cr: &Context, width: f64, height: f64) -> Vec<Hit> {
         cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Normal);
         cr.set_font_size(16.0);
         let text = "No MasterHUB connected";
-        let ext = cr.text_extents(text).ok();
-        let tw = ext.map_or(0.0, |e| e.width());
+        let tw = cr.text_extents(text).map_or(0.0, |e| e.width());
         cr.move_to((width - tw) / 2.0, height / 2.0);
         cr.show_text(text).ok();
     }
     hits
+}
+
+/// Bounding box in view cells.
+struct BBox {
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+}
+
+impl Default for BBox {
+    fn default() -> Self {
+        Self { x0: f64::MAX, y0: f64::MAX, x1: f64::MIN, y1: f64::MIN }
+    }
+}
+
+impl BBox {
+    fn is_empty(&self) -> bool {
+        self.x0 > self.x1
+    }
+
+    /// Add the natural rectangle (0,0)-(w,h) mapped through `m`.
+    fn add_rect(&mut self, m: &Matrix, (w, h): (f64, f64)) {
+        for (x, y) in [(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)] {
+            let (px, py) = m.transform_point(x, y);
+            self.x0 = self.x0.min(px);
+            self.y0 = self.y0.min(py);
+            self.x1 = self.x1.max(px);
+            self.y1 = self.y1.max(py);
+        }
+    }
 }
 
 /// Natural module coords → widget pixels for a module at `placement`.
