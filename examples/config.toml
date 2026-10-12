@@ -1,0 +1,79 @@
+# openmasterhub example configuration
+# Copy to ~/.config/openmasterhub/config.toml
+#
+# Actions:  press = { cmd = "shell command" }   (runs with sh -c)
+#           press = { keys = "ctrl+shift+m" }    (virtual keyboard; key names as in
+#                                                 linux/input-event-codes.h without KEY_,
+#                                                 e.g. playpause, volumeup, f13)
+# Faders:   change = { cmd = "... {value} ..." } ({value} = 0..100, left..right)
+
+# font = "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf"   # default: fc-match sans:bold
+backlight = 80
+
+[leds]
+base = "#ff2020"
+fader = ["#ff0000", "#ff8000", "#ffff00", "#00ff00", "#0080ff"]   # top..bottom
+knob = "#8000ff"
+brightness = 100
+
+# ---- 15-key keypad: index 0..14, row-major from top-left ----
+[[key]]
+index = 0
+label = "Play"
+background = "#1e5ac8"
+press = { keys = "playpause" }
+
+[[key]]
+index = 1
+label = "Prev"
+background = "#283c64"
+press = { keys = "previoussong" }
+
+[[key]]
+index = 2
+label = "Next"
+background = "#283c64"
+press = { keys = "nextsong" }
+
+[[key]]
+index = 4
+label = "Mute"
+background = "#c81e1e"
+press = { cmd = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" }
+
+[[key]]
+index = 14
+label = "Term"
+background = "#202020"
+press = { cmd = "xdg-terminal-exec || konsole || gnome-terminal" }
+
+# ---- big dial with 240x240 screen ----
+[dial]
+label = "Volume"
+background = "#101828"
+cw = { cmd = "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 1%+" }
+ccw = { cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 1%-" }
+press = { cmd = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" }
+
+# ---- faders: index 0 = top ----
+[[fader]]
+index = 0
+change = { cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ {value}%" }
+
+# ---- knobs: 0 = bottom-left, 1 = bottom-right, 2 = top ----
+[[knob]]
+index = 2
+cw = { keys = "volumeup" }
+ccw = { keys = "volumedown" }
+press = { keys = "mute" }
+
+# ---- rollers ----
+[[roller]]
+side = "left"
+away = { keys = "up" }
+toward = { keys = "down" }
+
+[[roller]]
+side = "right"
+away = { keys = "pageup" }
+toward = { keys = "pagedown" }

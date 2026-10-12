@@ -141,3 +141,11 @@ Feature `0x31` returns `31 14 00…` and feature `0x36` returns `36 10 <5 bytes>
   - `d0 = 04` is the button: `d2 1` = down, `0` = up.
 
 **Replug behaviour (verified):** after a USB replug or power cycle, every module returns to hardware mode with its default effects. The keys show the logo animation again and all LEDs go back to colour cycling. Nothing sent with `save=0` persists. The driver must therefore redo the full init on every (re)connect: software mode plus read-back for the M4315 and M131E, all key and dial images, and all LED modes and colours. The udev `uaccess` rule re-applies automatically on re-enumeration.
+
+**Firmware quirk: hardware mode is a one-way door (verified 2026-10-12).** After SET `03 3A 00` (keypad) or `03 49 00` (dial), the module ignores every later software-mode SET until it is power-cycled.
+- The SET is acknowledged on the bus, but GET `0x03` and all info GETs then return 0 bytes.
+- We saw this through 99 retries over 30 s, and also with the user touching the keys and dial.
+- After a replug, the very first `03 3A 01` / `03 49 01` works immediately: GET `0x03` returns `03 00 …` and the logo animation stops.
+- **A host driver must therefore never send hardware mode.** `masterhubd` blanks the screens on exit instead.
+
+**How to tell whether software mode took effect:** GET `0x03` returns 32 bytes (`03 00 …`) right after the SET. A 0-byte reply means the command was ignored.
