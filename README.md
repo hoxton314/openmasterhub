@@ -19,6 +19,18 @@ Protocol documentation: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) and `docs/protoco
 
 ## Install
 
+### Arch Linux (AUR)
+
+```sh
+paru -S openmasterhub-bin        # or yay -S openmasterhub-bin
+systemctl --user enable --now masterhubd
+```
+
+The package installs the udev rule (access for the logged-in user), the systemd user unit and
+the app launcher entry.
+
+### From source
+
 ```sh
 # Access to the modules for the logged-in user
 sudo install -m644 udev/70-masterhub.rules /etc/udev/rules.d/
@@ -28,8 +40,9 @@ sudo udevadm control --reload && sudo udevadm trigger
 cargo install --path crates/masterhubd
 cargo install --path crates/openmasterhub
 
-# Run the service at login
-install -Dm644 dist/masterhubd.service ~/.config/systemd/user/masterhubd.service
+# Run the service at login (the unit expects /usr/bin; point it at ~/.cargo/bin)
+mkdir -p ~/.config/systemd/user
+sed "s|/usr/bin/|$HOME/.cargo/bin/|" dist/masterhubd.service > ~/.config/systemd/user/masterhubd.service
 systemctl --user enable --now masterhubd
 
 # App launcher entry
@@ -52,3 +65,4 @@ every option. The service reloads the file when it is edited by hand.
   ignore software mode until the MasterHUB is unplugged and replugged. `masterhubd` never sends
   hardware mode and tells you in its log when a replug is needed.
 - `tools/` contains the Python probe and usbmon scripts used while reverse-engineering.
+- Releases and the AUR package are built by CI; see [`docs/RELEASING.md`](docs/RELEASING.md).

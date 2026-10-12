@@ -48,8 +48,7 @@ pub fn load_picture(path: &Path, size: u32) -> Result<Picture> {
                     .map(|f| {
                         let (num, den) = f.delay().numer_denom_ms();
                         // Browsers treat delays under 20 ms as 100 ms; do the same.
-                        let ms = if den == 0 { 100 } else { (num / den).max(20) };
-                        let ms = if ms <= 20 { 100 } else { ms };
+                        let ms = num.checked_div(den).filter(|&ms| ms > 20).unwrap_or(100);
                         (fit(DynamicImage::ImageRgba8(f.into_buffer()), size), Duration::from_millis(ms as u64))
                     })
                     .collect(),

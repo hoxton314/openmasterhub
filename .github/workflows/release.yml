@@ -1,0 +1,131 @@
+name: Release
+
+# Push a tag `vX.Y.Z` (matching the workspace version in Cargo.toml):
+#   1. `build` checks, tests and builds on Arch, stages the tarball, renders the AUR
+#      PKGBUILD with the real checksum, builds the package from it with makepkg, and
+#      uploads everything to a DRAFT GitHub release.
+#   2. `publish` waits for manual approval (environment `aur`), then publishes the GitHub
+#      release and pushes the PKGBUILD to the AUR. Releasing to the AUR only after the draft
+#      is public matters: draft assets cannot be downloaded by makepkg.
+# See docs/RELEASING.md.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm --needed git rust gtk4 libadwaita pkgconf github-cli
+
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the Cargo version
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cargo_version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          if [ "$version" != "$cargo_version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $cargo_version in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Build
+        run: cargo build --release --locked
+
+      # makepkg refuses to run as root, which the container is.
+      - name: Stage release and test the AUR package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          useradd -m builder
+          install -d -o builder /tmp/release
+          runuser -u builder -- .github/scripts/stage-release.sh "$VERSION" "$PWD/target" /tmp/release
+          runuser -u builder -- .github/scripts/test-pkgbuild.sh /tmp/release "$VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: |
+            /tmp/release/openmasterhub-*-x86_64.tar.gz
+            /tmp/release/aur/PKGBUILD
+            /tmp/release/aur/.SRCINFO
+            /tmp/release/aur/openmasterhub.install
+          include-hidden-files: true
+          if-no-files-found: error
+
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tarball="/tmp/release/openmasterhub-${VERSION}-x86_64.tar.gz"
+          if gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$tarball" -R "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$tarball" -R "$GITHUB_REPOSITORY" \
+              --draft --title "OpenMasterHUB v${VERSION}" --generate-notes
+          fi
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Protected environment: requires a reviewer to approve before this job starts.
+    environment:
+      name: aur
+      url: https://aur.archlinux.org/packages/openmasterhub-bin
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: release
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest
+
+      - name: Check the public tarball matches the PKGBUILD
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/openmasterhub-${VERSION}-x86_64.tar.gz"
+          expected=$(sed -n "s/^sha256sums=('\(.*\)')/\1/p" release/aur/PKGBUILD)
+          actual=$(curl -fsSL --retry 5 --retry-delay 3 "$url" | sha256sum | cut -d' ' -f1)
+          echo "expected $expected"
+          echo "actual   $actual"
+          [ "$expected" = "$actual" ] || { echo "::error::published tarball does not match the PKGBUILD checksum"; exit 1; }
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.2
+        with:
+          pkgname: openmasterhub-bin
+          pkgbuild: ./release/aur/PKGBUILD
+          assets: ./release/aur/openmasterhub.install
+          commit_username: ${{ secrets.AUR_USERNAME }}
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to v${{ needs.build.outputs.version }}"
