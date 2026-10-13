@@ -75,3 +75,4 @@ every option. The service reloads the file when it is edited by hand.
   hardware mode and tells you in its log when a replug is needed.
 - `tools/` contains the Python probe and usbmon scripts used while reverse-engineering.
 - Releases and the AUR package are built by CI; see [`docs/RELEASING.md`](docs/RELEASING.md).
+- What comes next: [`docs/ROADMAP.md`](docs/ROADMAP.md).
