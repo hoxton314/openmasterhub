@@ -133,8 +133,10 @@ fn start_service() -> Result<(), String> {
 fn launch_service() -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     {
-        let ok = std::process::Command::new("systemctl").args(["--user", "start", "masterhubd"]).status().is_ok_and(|s| s.success());
-        anyhow::ensure!(ok, "could not start masterhubd.service; run masterhubd in a terminal instead");
+        // Restart rather than start: the unit can be active yet unreachable, e.g. the old
+        // binary still running after a package upgrade changed the IPC.
+        let ok = std::process::Command::new("systemctl").args(["--user", "restart", "masterhubd"]).status().is_ok_and(|s| s.success());
+        anyhow::ensure!(ok, "could not restart masterhubd.service; run masterhubd in a terminal instead");
         Ok(())
     }
     #[cfg(not(target_os = "linux"))]
