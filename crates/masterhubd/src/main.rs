@@ -4,6 +4,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod actions;
+mod claude;
 mod controller;
 mod focus;
 mod hid;
@@ -26,6 +27,7 @@ use masterhub_core::config::{self, Config};
 use crate::controller::{Controller, Snapshot};
 
 const USAGE: &str = "usage: masterhubd [--config PATH] [--check] [--list]
+       masterhubd claude-hook   (Claude Code hook, see docs/CLAUDE_CODE.md)
 
   --config PATH  config file (default: $XDG_CONFIG_HOME/openmasterhub/config.toml)
   --check        validate the config and exit
@@ -34,6 +36,10 @@ const USAGE: &str = "usage: masterhubd [--config PATH] [--check] [--list]
 Logging: RUST_LOG=debug masterhubd";
 
 fn main() -> Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("claude-hook") {
+        claude::hook();
+        return Ok(());
+    }
     init_logging();
 
     let mut config_path = None;

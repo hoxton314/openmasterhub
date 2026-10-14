@@ -25,6 +25,13 @@ fader = ["#ff0000", "#ff8000", "#ffff00", "#00ff00", "#0080ff"]   # top..bottom
 knob = ["#ff0000", "#00ff00", "#0000ff"]                           # bottom-left, bottom-right, top
 brightness = 100
 
+# Base LED while Claude Code sessions run (hooks call `masterhubd claude-hook`, see
+# docs/CLAUDE_CODE.md). The most urgent session wins; without sessions the Base keeps [leds].
+[status]
+attention = "#ff4000"   # a session waits for your answer: flashes
+ready = "#00ff40"       # finished, waiting for a new prompt
+working = "#0060ff"
+
 # ─────────────────────────────── Default profile ───────────────────────────────
 [[profile]]
 name = "Default"

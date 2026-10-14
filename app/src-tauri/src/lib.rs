@@ -128,6 +128,27 @@ fn start_service() -> Result<(), String> {
     launch_service().map_err(err)
 }
 
+#[tauri::command]
+fn restart_service() -> Result<(), String> {
+    stop_service();
+    launch_service().map_err(err)
+}
+
+/// End a running masterhubd so a new one can take the pipe. On Linux, `launch_service`
+/// restarts the systemd unit itself.
+fn stop_service() {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/IM", "masterhubd.exe", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
 /// Start masterhubd: through systemd on Linux, or the service bundled next to the app
 /// elsewhere (detached, so it keeps running when the app closes).
 fn launch_service() -> anyhow::Result<()> {
@@ -244,7 +265,8 @@ pub fn run() {
             show_page,
             preview_face,
             open_window_classes,
-            start_service
+            start_service,
+            restart_service
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");

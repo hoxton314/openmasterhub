@@ -9,13 +9,13 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use masterhub_core::config::{Action, Config, Face, Leds, Page, Side, Widget};
-use masterhub_core::ipc::{DisplayImage, Event, GUI_APP_ID, HubState, InputMsg, ModuleState, TARGET_DIAL};
+use masterhub_core::config::{Action, Color, Config, Face, Leds, Page, Side, Widget};
+use masterhub_core::ipc::{DisplayImage, Event, GUI_APP_ID, HubState, InputMsg, ModuleState, Status, TARGET_DIAL};
 use masterhub_core::layout;
 use masterhub_core::render::{DIAL_SIZE, KEY_SIZE, LiveData, Picture, Renderer, load_picture};
 use masterhub_proto::{
-    ImageTarget, InputReport, KEY_COUNT, KeyTracker, LedMode, LedTarget, ModuleKind, Roll, Rotation, led_brightness,
-    led_color, led_mode,
+    ImageTarget, InputReport, KEY_COUNT, KeyTracker, LedMode, LedTarget, ModuleKind, Rgb, Roll, Rotation,
+    led_brightness, led_color, led_mode,
 };
 
 use crate::actions::Request;
@@ -33,6 +33,8 @@ pub enum Msg {
     ApplyConfig { config: Box<Config>, text: String },
     SetProfile(String),
     ShowPage(String),
+    /// A tool's status for the Base LED; `None` forgets the source.
+    SetStatus { source: String, status: Option<Status>, pid: Option<u32> },
 }
 
 /// State shared with the IPC server.
@@ -83,9 +85,17 @@ pub struct Controller {
     actions: Sender<Request>,
     snapshot: Arc<Mutex<Snapshot>>,
     events: Arc<Broadcaster>,
+    /// Tool status per source, with the process that reported it.
+    statuses: HashMap<String, (Status, Option<u32>)>,
+    /// Status on the Base LED, whether a flash is lit and when it toggles next.
+    shown_status: Option<Status>,
+    blink_on: bool,
+    blink_due: Option<Instant>,
 }
 
 const TICK: Duration = Duration::from_secs(1);
+/// Half period of the attention flash.
+const BLINK: Duration = Duration::from_millis(500);
 
 impl Controller {
     pub fn new(
@@ -120,6 +130,10 @@ impl Controller {
             actions,
             snapshot,
             events,
+            statuses: HashMap::new(),
+            shown_status: None,
+            blink_on: true,
+            blink_due: None,
         };
         c.publish_state();
         c
@@ -129,7 +143,7 @@ impl Controller {
         let mut next_tick = Instant::now();
         loop {
             let now = Instant::now();
-            let next_anim = self.anims.values().map(|a| a.due).min();
+            let next_anim = self.anims.values().map(|a| a.due).chain(self.blink_due).min();
             let deadline = next_anim.map_or(next_tick, |a| a.min(next_tick));
             match rx.recv_timeout(deadline.saturating_duration_since(now)) {
                 Ok(msg) => self.handle(msg),
@@ -140,10 +154,12 @@ impl Controller {
             if now >= next_tick {
                 next_tick = now + TICK;
                 self.check_config_file();
+                self.prune_statuses();
                 self.sample_widgets();
                 self.refresh_all();
             }
             self.advance_animations(now);
+            self.advance_blink(now);
         }
     }
 
@@ -198,6 +214,14 @@ impl Controller {
                 }
             }
             Msg::ShowPage(name) => self.show_page(&name),
+            Msg::SetStatus { source, status, pid } => {
+                log::debug!("status {source}: {status:?}");
+                match status {
+                    Some(st) => self.statuses.insert(source, (st, pid)),
+                    None => self.statuses.remove(&source),
+                };
+                self.update_status();
+            }
         }
     }
 
@@ -228,6 +252,7 @@ impl Controller {
             self.renderer = Renderer::new(config.font.as_deref());
         }
         self.config = config;
+        self.update_status();
         self.pictures.clear();
         self.anims.clear();
         // Keep the user where they were if that still exists.
@@ -362,7 +387,7 @@ impl Controller {
         let kind = m.info.kind;
         let leds = self.effective_leds();
         let colors = match kind {
-            ModuleKind::Base => leds.base.map(masterhub_core::config::OneOrMany::One),
+            ModuleKind::Base => self.status_color().or(leds.base).map(masterhub_core::config::OneOrMany::One),
             ModuleKind::Fader => leds.fader.clone(),
             ModuleKind::Knob => leds.knob.clone(),
             _ => return,
@@ -378,6 +403,71 @@ impl Controller {
             reports.extend(led_brightness(kind, t, brightness));
         }
         let _ = m.tx.send(DeviceCmd::Output(reports));
+    }
+
+    // ───────────────────────────── tool status ─────────────────────────────
+
+    /// The status colour on the Base right now (dark in the off phase of a flash).
+    fn status_color(&self) -> Option<Color> {
+        let st = self.shown_status?;
+        let c = &self.config.status;
+        Some(match st {
+            Status::Attention if !self.blink_on => Color(Rgb::default()),
+            Status::Attention => c.attention,
+            Status::Ready => c.ready,
+            Status::Working => c.working,
+        })
+    }
+
+    /// Show the most urgent status of all sources on the Base.
+    fn update_status(&mut self) {
+        let top = if self.config.status.enabled { self.statuses.values().map(|(s, _)| *s).max() } else { None };
+        if top == self.shown_status {
+            return;
+        }
+        log::info!("base status: {top:?}");
+        self.shown_status = top;
+        self.blink_on = true;
+        self.blink_due = (top == Some(Status::Attention)).then(|| Instant::now() + BLINK);
+        let Some(serial) = self.base_serial() else { return };
+        if top.is_none() && self.effective_leds().base.is_none() {
+            // No Base colour configured: back to the firmware's colour cycling.
+            if let Some(m) = self.modules.get(&serial) {
+                let reports = led_mode(ModuleKind::Base, LedTarget::Index(0), LedMode::Cycling).into_iter().collect();
+                let _ = m.tx.send(DeviceCmd::Output(reports));
+            }
+        } else {
+            self.send_leds(&serial);
+        }
+    }
+
+    fn advance_blink(&mut self, now: Instant) {
+        let Some(due) = self.blink_due.filter(|d| *d <= now) else { return };
+        self.blink_on = !self.blink_on;
+        self.blink_due = Some((due + BLINK).max(now));
+        if let (Some(c), Some(m)) = (self.status_color(), self.base_serial().and_then(|s| self.modules.get(&s))) {
+            let reports = led_color(ModuleKind::Base, LedTarget::Index(0), c.0).into_iter().collect();
+            let _ = m.tx.send(DeviceCmd::Output(reports));
+        }
+    }
+
+    /// Forget sources whose process has exited without clearing its status.
+    fn prune_statuses(&mut self) {
+        let before = self.statuses.len();
+        self.statuses.retain(|source, (_, pid)| {
+            let alive = pid.is_none_or(process_alive);
+            if !alive {
+                log::info!("status {source}: process gone");
+            }
+            alive
+        });
+        if self.statuses.len() != before {
+            self.update_status();
+        }
+    }
+
+    fn base_serial(&self) -> Option<String> {
+        self.modules.values().find(|m| m.info.kind == ModuleKind::Base).map(|m| m.info.serial.clone())
     }
 
     fn refresh_all(&mut self) {
@@ -680,6 +770,16 @@ impl Controller {
             self.refresh_all();
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn process_alive(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_alive(_pid: u32) -> bool {
+    true
 }
 
 fn mtime(path: &std::path::Path) -> Option<SystemTime> {
