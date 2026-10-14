@@ -88,6 +88,12 @@ listed app is focused.
   </tr>
 </table>
 
+### Claude Code on the Base LED
+
+The Base light flashes when one of your Claude Code sessions needs an answer, turns green when
+a session is ready for a new prompt and blue while they work. Setup: [`docs/CLAUDE_CODE.md`](docs/CLAUDE_CODE.md)
+(Linux).
+
 ## Install
 
 | Platform | Package |

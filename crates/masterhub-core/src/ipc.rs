@@ -15,6 +15,7 @@
 //! | `get_displays` | | `Vec<DisplayImage>` |
 //! | `set_profile` | `name` | switch profile (until the focused app changes) |
 //! | `show_page` | `name` | show a keypad page or folder of the active profile |
+//! | `set_status` | `source`, `status`, `pid` | set (or clear, `status: null`) a tool's [`Status`] |
 //!
 //! Events: `input`, `state`, `modules`, `display`, `config_changed`.
 
@@ -91,6 +92,15 @@ impl DisplayImage {
     }
 }
 
+/// What a tool (e.g. a Claude Code session) is doing, shown on the Base LED. Ordered by urgency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Status {
+    Working,
+    Ready,
+    Attention,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum Request {
@@ -102,6 +112,14 @@ pub enum Request {
     GetDisplays,
     SetProfile { name: String },
     ShowPage { name: String },
+    /// `source` identifies the reporter, e.g. `claude:<session id>`. The service forgets it when
+    /// `pid` exits (Linux).
+    SetStatus {
+        source: String,
+        status: Option<Status>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pid: Option<u32>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -172,6 +190,23 @@ pub fn write_line<W: Write, T: Serialize>(w: &mut W, msg: &T) -> std::io::Result
 }
 
 // ───────────────────────────── client ─────────────────────────────
+
+/// Connect, send one request and wait for its answer. For short-lived callers such as hooks.
+pub fn call_once(request: Request) -> Result<serde_json::Value> {
+    let stream = Stream::connect(socket_name()?).context("the masterhubd service is not running")?;
+    let (recv, mut send) = stream.split();
+    write_line(&mut send, &RequestMsg { id: 1, request }).context("sending to masterhubd")?;
+    for line in BufReader::new(recv).lines() {
+        // Events are broadcast to every client; skip them.
+        if let Ok(ServerMsg::Response(r)) = serde_json::from_str::<ServerMsg>(&line?) {
+            return match r.error {
+                Some(e) => Err(anyhow!(e)),
+                None => Ok(r.result.unwrap_or(serde_json::Value::Null)),
+            };
+        }
+    }
+    Err(anyhow!("masterhubd closed the connection"))
+}
 
 /// What the client reports to the app.
 #[derive(Debug, Clone)]
@@ -291,6 +326,16 @@ mod tests {
         let r = RequestMsg { id: 1, request: Request::GetState };
         assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"id":1,"method":"get_state"}"#);
         assert_eq!(serde_json::from_str::<RequestMsg>(r#"{"id":1,"method":"get_state"}"#).unwrap(), r);
+
+        let r = RequestMsg {
+            id: 2,
+            request: Request::SetStatus { source: "claude:x".into(), status: Some(Status::Attention), pid: None },
+        };
+        assert_eq!(
+            serde_json::to_string(&r).unwrap(),
+            r#"{"id":2,"method":"set_status","params":{"source":"claude:x","status":"attention"}}"#
+        );
+        assert!(Status::Attention > Status::Ready && Status::Ready > Status::Working);
 
         let e = ServerMsg::Event(Event::ConfigChanged);
         assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"type":"event","event":"config_changed"}"#);

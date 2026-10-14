@@ -74,6 +74,14 @@ export interface Leds {
   brightness?: number;
 }
 
+/** Base LED colours for tool status (Claude Code sessions). */
+export interface StatusLeds {
+  enabled?: boolean;
+  attention?: Color;
+  ready?: Color;
+  working?: Color;
+}
+
 export interface Profile {
   name: string;
   apps?: string[];
@@ -92,6 +100,7 @@ export interface Config {
   font?: string;
   backlight: number;
   leds?: Leds;
+  status?: StatusLeds;
   orientation?: Orientation;
   upright?: boolean;
   profile?: Profile[];

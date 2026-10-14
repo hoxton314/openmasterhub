@@ -18,6 +18,9 @@ pub struct Config {
     pub backlight: u8,
     #[serde(default, skip_serializing_if = "Leds::is_empty")]
     pub leds: Leds,
+    /// Base LED colours for tool status, such as Claude Code sessions (`masterhubd claude-hook`).
+    #[serde(default, skip_serializing_if = "StatusLeds::is_default")]
+    pub status: StatusLeds,
     /// How the Base is placed on the desk. `auto` follows its tilt sensor.
     #[serde(default, skip_serializing_if = "Orientation::is_auto")]
     pub orientation: Orientation,
@@ -37,6 +40,7 @@ impl Default for Config {
             font: None,
             backlight: default_backlight(),
             leds: Leds::default(),
+            status: StatusLeds::default(),
             orientation: Orientation::Auto,
             upright: true,
             profiles: Vec::new(),
@@ -162,6 +166,37 @@ pub struct Leds {
 
 impl Leds {
     pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Base LED colours while a tool reports a status (see `ipc::Status`). The most urgent status
+/// of all sources wins; with none, the Base shows its normal colour.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StatusLeds {
+    pub enabled: bool,
+    /// Something waits for an answer; flashes.
+    pub attention: Color,
+    /// Finished, waiting for a new prompt.
+    pub ready: Color,
+    /// Busy.
+    pub working: Color,
+}
+
+impl Default for StatusLeds {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            attention: Color(Rgb::new(0xff, 0x40, 0x00)),
+            ready: Color(Rgb::new(0x00, 0xff, 0x40)),
+            working: Color(Rgb::new(0x00, 0x60, 0xff)),
+        }
+    }
+}
+
+impl StatusLeds {
+    pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
 }
