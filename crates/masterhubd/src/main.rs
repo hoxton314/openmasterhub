@@ -4,6 +4,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod actions;
+mod audio;
 mod claude;
 mod controller;
 mod focus;
@@ -26,14 +27,27 @@ use masterhub_core::config::{self, Config};
 
 use crate::controller::{Controller, Snapshot};
 
-const USAGE: &str = "usage: masterhubd [--config PATH] [--check] [--list]
+#[cfg(windows)]
+const DEFAULT_CONFIG: &str = r"%APPDATA%\openmasterhub\config.toml";
+#[cfg(not(windows))]
+const DEFAULT_CONFIG: &str = "$XDG_CONFIG_HOME/openmasterhub/config.toml";
+
+/// Written on first run on Windows, where the installer leaves no config behind.
+#[cfg(windows)]
+const STARTER_CONFIG: &str = include_str!("../../../examples/starter.toml");
+
+fn usage() -> String {
+    format!(
+        "usage: masterhubd [--config PATH] [--check] [--list]
        masterhubd claude-hook   (Claude Code hook, see docs/CLAUDE_CODE.md)
 
-  --config PATH  config file (default: $XDG_CONFIG_HOME/openmasterhub/config.toml)
+  --config PATH  config file (default: {DEFAULT_CONFIG})
   --check        validate the config and exit
   --list         list connected modules and exit
 
-Logging: RUST_LOG=debug masterhubd";
+Logging: RUST_LOG=debug masterhubd"
+    )
+}
 
 fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("claude-hook") {
@@ -51,10 +65,10 @@ fn main() -> Result<()> {
             "--check" => check = true,
             "--list" => list = true,
             "-h" | "--help" => {
-                println!("{USAGE}");
+                println!("{}", usage());
                 return Ok(());
             }
-            other => bail!("unknown argument {other:?}\n\n{USAGE}"),
+            other => bail!("unknown argument {other:?}\n\n{}", usage()),
         }
     }
 
@@ -66,7 +80,16 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    #[cfg(windows)]
+    let first_run = config_path.is_none() && !check;
     let path = config_path.unwrap_or_else(config::default_path);
+    #[cfg(windows)]
+    if first_run && !path.exists() {
+        match path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(&path, STARTER_CONFIG)) {
+            Ok(()) => log::info!("first run: wrote the starter config to {}", path.display()),
+            Err(e) => log::warn!("writing the starter config to {}: {e}", path.display()),
+        }
+    }
     let (config, text) = if path.exists() {
         let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
         (Config::load(&path)?, text)
@@ -131,7 +154,7 @@ fn main() -> Result<()> {
 }
 
 /// Log to stderr, or on Windows without a console (started at login) to
-/// `%LOCALAPPDATA%\openmasterhub\masterhubd.log`.
+/// `%LOCALAPPDATA%\openmasterhub\masterhubd.log` (see `open_log`).
 fn init_logging() {
     let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
     #[cfg(windows)]
@@ -143,10 +166,22 @@ fn init_logging() {
         if !has_console
             && let Some(dir) = std::env::var_os("LOCALAPPDATA").map(|d| PathBuf::from(d).join("openmasterhub"))
             && std::fs::create_dir_all(&dir).is_ok()
-            && let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("masterhubd.log"))
+            && let Ok(file) = open_log(&dir)
         {
             builder.target(env_logger::Target::Pipe(Box::new(file)));
         }
     }
     builder.init();
+}
+
+/// `masterhubd.log` in `dir`, appended to. Past 1 MiB it becomes `masterhubd.old.log` (replacing
+/// the previous one), so the log cannot grow without bound.
+#[cfg(windows)]
+fn open_log(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
+    const MAX_LOG: u64 = 1 << 20;
+    let log = dir.join("masterhubd.log");
+    if std::fs::metadata(&log).is_ok_and(|m| m.len() > MAX_LOG) {
+        let _ = std::fs::rename(&log, dir.join("masterhubd.old.log"));
+    }
+    std::fs::OpenOptions::new().create(true).append(true).open(log)
 }

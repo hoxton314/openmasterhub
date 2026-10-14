@@ -10,12 +10,13 @@ on the Base LED. With several sessions open, the most urgent one wins:
 | working | `#0060ff` | every session is busy |
 | (none) | your `[leds] base` colour | no Claude Code session is open |
 
-Linux only for now: the service forgets a session whose `claude` process has exited, even if
-it never sent `SessionEnd`.
+Works on Linux and Windows. The service forgets a session whose `claude` process has exited,
+even if it never sent `SessionEnd`.
 
 ## Set up
 
-1. Make sure `masterhubd` is running (`systemctl --user status masterhubd`) and is on your `PATH`.
+1. Make sure `masterhubd` is running (Linux: `systemctl --user status masterhubd`, Windows: the
+   installer starts it at login) and, on Linux, is on your `PATH`.
 2. Add the hooks to `~/.claude/settings.json` (merge with any `hooks` you already have):
 
 ```json
@@ -35,6 +36,15 @@ it never sent `SessionEnd`.
   }
 }
 ```
+
+   **Windows:** the installer does not put `masterhubd.exe` on `PATH`, so give its full path.
+   Claude Code runs hooks through Git Bash, so in every hook above use:
+
+   ```json
+   "command": "\"$LOCALAPPDATA/OpenMasterHUB/masterhubd.exe\" claude-hook"
+   ```
+
+   (`%LOCALAPPDATA%\OpenMasterHUB` is where the installer puts the app and the service.)
 
 3. Start a new Claude Code session.
 

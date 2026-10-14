@@ -1,8 +1,8 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ArrowLeft, ArrowRight, Ban, ChevronDown, CornerUpLeft, Folder, Keyboard, LayoutGrid, Terminal, UserRound } from 'lucide-svelte';
+  import { ArrowLeft, ArrowRight, Ban, ChevronDown, CornerUpLeft, Folder, Keyboard, LayoutGrid, Terminal, UserRound, Volume2, VolumeX } from 'lucide-svelte';
   import { currentProfile, describe, hub } from '../lib/hub.svelte';
-  import type { Action } from '../lib/types';
+  import type { Action, Mute } from '../lib/types';
 
   let { title, value, onchange }: { title: string; value: Action | undefined; onchange: (a: Action | undefined) => void } = $props();
 
@@ -10,6 +10,8 @@
     { k: 'none', label: 'Nothing', icon: Ban },
     { k: 'keys', label: 'Shortcut', icon: Keyboard },
     { k: 'cmd', label: 'Command', icon: Terminal },
+    { k: 'volume', label: 'Volume', icon: Volume2 },
+    { k: 'mute', label: 'Mute', icon: VolumeX },
     { k: 'next', label: 'Next', icon: ArrowRight },
     { k: 'prev', label: 'Previous', icon: ArrowLeft },
     { k: 'page', label: 'Page', icon: LayoutGrid },
@@ -18,11 +20,16 @@
     { k: 'profile', label: 'Profile', icon: UserRound },
   ] as const;
   type Kind = (typeof KINDS)[number]['k'];
+  /** Same forms as `VolumeChange::parse` in masterhub-core. */
+  const VOLUME = /^\s*([+-]\s*\d+|\d{1,2}|100|\{value\})\s*$/;
+  const WINDOWS = navigator.userAgent.includes('Windows');
 
   function kindOf(a: Action | undefined): Kind {
     if (!a) return 'none';
     if ('cmd' in a) return 'cmd';
     if ('keys' in a) return 'keys';
+    if ('volume' in a) return 'volume';
+    if ('mute' in a) return 'mute';
     if ('page' in a) return a.page === 'next' ? 'next' : a.page === 'prev' ? 'prev' : 'page';
     if ('folder' in a) return 'folder';
     if ('back' in a) return 'back';
@@ -32,6 +39,8 @@
     if (!a) return '';
     if ('cmd' in a) return a.cmd;
     if ('keys' in a) return a.keys;
+    if ('volume' in a) return a.volume;
+    if ('mute' in a) return a.mute;
     if ('page' in a) return a.page === 'next' || a.page === 'prev' ? '' : a.page;
     if ('folder' in a) return a.folder;
     if ('profile' in a) return a.profile;
@@ -56,6 +65,8 @@
     switch (kind) {
       case 'cmd': return arg ? { cmd: arg } : undefined;
       case 'keys': return arg ? { keys: arg } : undefined;
+      case 'volume': return VOLUME.test(arg) ? { volume: arg } : undefined;
+      case 'mute': return { mute: (arg || 'toggle') as Mute };
       case 'next': return { page: 'next' };
       case 'prev': return { page: 'prev' };
       case 'page': return arg ? { page: arg } : undefined;
@@ -69,6 +80,8 @@
   function pick(k: Kind) {
     kind = k;
     if (k === 'page' || k === 'folder' || k === 'profile') arg = names[0] ?? '';
+    else if (k === 'volume') arg = '+2';
+    else if (k === 'mute') arg = 'toggle';
     else if (k !== 'cmd' && k !== 'keys') arg = '';
     onchange(build());
   }
@@ -97,12 +110,26 @@
         <input
           class="input mono"
           value={arg}
-          placeholder={kind === 'keys' ? 'ctrl+shift+m · playpause · f13' : 'wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle'}
+          placeholder={kind === 'keys' ? 'ctrl+shift+m · playpause · f13' : WINDOWS ? 'start notepad' : 'xdg-open ~'}
           oninput={(e) => { arg = e.currentTarget.value; onchange(build()); }}
         />
         <p class="hint">
-          {#if kind === 'keys'}Modifiers and keys joined with +. Media keys: playpause, nextsong, previoussong, mute, volumeup.{:else}Runs in a shell.{/if}
+          {#if kind === 'keys'}Modifiers and keys joined with +. Media keys: playpause, nextsong, previoussong, mute, volumeup.{:else if WINDOWS}Runs with cmd /C.{:else}Runs in a shell.{/if}
         </p>
+      {:else if kind === 'volume'}
+        <input
+          class="input mono"
+          value={arg}
+          placeholder={'+2 · -2 · 40 · {value}'}
+          oninput={(e) => { arg = e.currentTarget.value; onchange(build()); }}
+        />
+        <p class="hint">+2 or -2 changes the volume, 40 sets it, {'{value}'} follows a fader.</p>
+      {:else if kind === 'mute'}
+        <select class="select" value={arg} onchange={(e) => { arg = e.currentTarget.value; onchange(build()); }}>
+          <option value="toggle">Toggle</option>
+          <option value="on">Mute</option>
+          <option value="off">Unmute</option>
+        </select>
       {:else if kind === 'page' || kind === 'folder' || kind === 'profile'}
         <select class="select" value={arg} onchange={(e) => { arg = e.currentTarget.value; onchange(build()); }}>
           {#each names as n}<option value={n}>{n}</option>{/each}

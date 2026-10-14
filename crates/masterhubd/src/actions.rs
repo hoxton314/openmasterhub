@@ -1,4 +1,4 @@
-//! Executes actions on a dedicated thread: shell commands and virtual key presses.
+//! Executes actions on a dedicated thread: shell commands, virtual key presses and volume.
 
 use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use masterhub_core::config::Action;
+use masterhub_core::config::{Action, VolumeChange};
 
+use crate::audio;
 use crate::keyboard::Keyboard;
 
 pub struct Request {
@@ -39,6 +40,19 @@ fn run(rx: Receiver<Request>) {
                 Action::Keys(combo) => {
                     if let Err(e) = keyboard.send(&combo) {
                         log::error!("keys {combo:?}: {e:#}");
+                    }
+                }
+                Action::Volume(v) => match VolumeChange::parse(&v, req.value) {
+                    Some(change) => {
+                        if let Err(e) = audio::set_volume(change) {
+                            log::error!("volume {v:?}: {e:#}");
+                        }
+                    }
+                    None => log::error!("volume {v:?}: invalid"),
+                },
+                Action::Mute(m) => {
+                    if let Err(e) = audio::set_mute(m) {
+                        log::error!("mute {m:?}: {e:#}");
                     }
                 }
                 // Navigation is handled by the controller and never reaches this thread.

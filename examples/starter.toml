@@ -1,0 +1,92 @@
+# OpenMasterHUB starter configuration, written on first run (Windows) when there is no config.
+# Only built-in actions, so it works on every OS. Edit it in the app, or see
+# examples/config.toml for every option.
+
+backlight = 80
+
+[leds]
+base = "#7aa2f7"
+brightness = 100
+
+[[profile]]
+name = "Default"
+
+[[profile.page]]
+name = "Main"
+
+[[profile.page.key]]
+index = 0
+label = "Prev"
+background = "#283c64"
+press = { keys = "previoussong" }
+
+[[profile.page.key]]
+index = 1
+label = "Play"
+background = "#1e5ac8"
+press = { keys = "playpause" }
+
+[[profile.page.key]]
+index = 2
+label = "Next"
+background = "#283c64"
+press = { keys = "nextsong" }
+
+[[profile.page.key]]
+index = 3
+widget = { kind = "clock" }
+background = "#101010"
+
+[[profile.page.key]]
+index = 4
+label = "Mute"
+background = "#c81e1e"
+press = { mute = "toggle" }
+
+[[profile.page.key]]
+index = 5
+widget = { kind = "cpu_usage" }
+
+[[profile.page.key]]
+index = 6
+widget = { kind = "gpu_usage" }
+
+[[profile.page.key]]
+index = 7
+widget = { kind = "ram_usage" }
+
+[[profile.page.key]]
+index = 8
+widget = { kind = "volume" }
+press = { mute = "toggle" }
+
+[[profile.page.key]]
+index = 9
+widget = { kind = "now_playing" }
+press = { keys = "playpause" }
+
+[profile.dial]
+widget = { kind = "volume" }
+cw = { volume = "+2" }
+ccw = { volume = "-2" }
+press = { mute = "toggle" }
+
+[[profile.fader]]
+index = 0
+change = { volume = "{value}" }
+
+[[profile.knob]]
+index = 2
+cw = { volume = "+2" }
+ccw = { volume = "-2" }
+press = { mute = "toggle" }
+
+[[profile.roller]]
+side = "left"
+away = { keys = "up" }
+toward = { keys = "down" }
+
+[[profile.roller]]
+side = "right"
+away = { keys = "pageup" }
+toward = { keys = "pagedown" }

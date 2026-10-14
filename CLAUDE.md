@@ -40,7 +40,9 @@ enough (CI touches one), for an installer copy the real `masterhubd` there.
 
 ## Conventions
 
-- Platform code lives behind `cfg` in `crates/masterhubd/src/{hid,keyboard,focus}/{linux,windows}.rs`
-  and small `#[cfg(windows)]` functions (`stats.rs`, `actions.rs`). Keep Linux behaviour unchanged.
+- Platform code lives behind `cfg` in `crates/masterhubd/src/{hid,keyboard,focus,audio}/{linux,windows}.rs`,
+  `stats/windows.rs` and small `#[cfg(windows)]` functions (`stats.rs`, `actions.rs`,
+  `claude.rs`). Keep Linux behaviour unchanged. The local `mod windows` shadows the `windows`
+  crate, so import it as `self::windows`.
 - Match the existing style: short doc comments, `anyhow` errors, `log` for diagnostics.
 - PRs go to `main`; the maintainer merges. Releases are tag-driven with a manual approval gate.

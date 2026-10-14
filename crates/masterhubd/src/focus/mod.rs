@@ -10,4 +10,4 @@ pub use hyprland::spawn;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::spawn;
+pub use self::windows::spawn;

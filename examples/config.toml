@@ -1,21 +1,28 @@
 # openmasterhub example configuration
-# Copy to ~/.config/openmasterhub/config.toml (the GUI edits this file for you).
+# Copy to ~/.config/openmasterhub/config.toml, or %APPDATA%\openmasterhub\config.toml on
+# Windows (the GUI edits this file for you).
 #
 # Actions:
-#   { cmd = "shell command" }       run with sh -c ({value} = fader position 0..100)
+#   { cmd = "shell command" }       run with sh -c, or cmd /C on Windows
+#                                   ({value} = fader position 0..100)
 #   { keys = "ctrl+shift+m" }       virtual keyboard; names from linux/input-event-codes.h
 #                                   without KEY_ (playpause, volumeup, f13, ...)
+#   { volume = "+2" }               default output volume: "+2"/"-2" change it, "40" sets
+#                                   it, "{value}" follows a fader
+#   { mute = "toggle" }             mute the default output: toggle, on, off
 #   { page = "next" | "prev" | "<page name>" }
 #   { folder = "<folder name>" }    open a keypad folder
 #   { back = true }                 leave the folder
 #   { profile = "<profile name>" }  switch profile
 #
 # Widgets (key or dial face): { kind = "clock", format = "%H:%M" }, cpu_usage, cpu_temp,
-#   ram_usage, gpu_usage, gpu_temp, volume, now_playing.
+#   ram_usage, gpu_usage, gpu_temp, volume, now_playing. On Windows, cpu_temp (and the GPU
+#   widgets without an NVIDIA driver) read LibreHardwareMonitor while it runs.
 # Images: PNG/JPEG, or GIF (animated).
 #
 # The first profile is the default. Other profiles activate when the focused window's class
-# matches one of their `apps` (Hyprland; case-insensitive, * wildcards).
+# matches one of their `apps` (Hyprland window class, or the .exe name on Windows;
+# case-insensitive, * wildcards).
 
 backlight = 80
 
@@ -66,7 +73,7 @@ background = "#101010"
 index = 4
 label = "Mute"
 background = "#c81e1e"
-press = { cmd = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" }
+press = { mute = "toggle" }
 
 [[profile.page.key]]
 index = 5
@@ -129,13 +136,13 @@ press = { cmd = "xdg-open ~" }
 
 [profile.dial]
 widget = { kind = "volume" }
-cw = { cmd = "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 1%+" }
-ccw = { cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ 1%-" }
-press = { cmd = "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle" }
+cw = { volume = "+1" }
+ccw = { volume = "-1" }
+press = { mute = "toggle" }
 
 [[profile.fader]]
 index = 0
-change = { cmd = "wpctl set-volume @DEFAULT_AUDIO_SINK@ {value}%" }
+change = { volume = "{value}" }
 
 [[profile.knob]]
 index = 2

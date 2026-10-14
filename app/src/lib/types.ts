@@ -8,7 +8,11 @@ export type Action =
   | { page: string }
   | { folder: string }
   | { back: boolean }
-  | { profile: string };
+  | { profile: string }
+  | { volume: string } // "+2", "-2", "40" or "{value}"
+  | { mute: Mute };
+
+export type Mute = 'toggle' | 'on' | 'off';
 
 export type Widget =
   | { kind: 'clock'; format?: string }

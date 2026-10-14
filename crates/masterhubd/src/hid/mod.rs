@@ -11,7 +11,7 @@ pub use linux::{HidDevice, enumerate};
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use windows::{HidDevice, enumerate};
+pub use self::windows::{HidDevice, enumerate};
 
 /// A connected MasterHUB module.
 #[derive(Debug, Clone, PartialEq, Eq)]

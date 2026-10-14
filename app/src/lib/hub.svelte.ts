@@ -196,6 +196,11 @@ export function describe(a: Action | undefined): string {
   if ('page' in a) return a.page === 'next' ? 'Next page' : a.page === 'prev' ? 'Previous page' : `Go to page “${a.page}”`;
   if ('folder' in a) return `Open folder “${a.folder}”`;
   if ('back' in a) return 'Leave folder';
+  if ('volume' in a) {
+    if (a.volume === '{value}') return 'Volume: follow the fader';
+    return /^[+-]/.test(a.volume) ? `Volume ${a.volume}%` : `Volume: set to ${a.volume}%`;
+  }
+  if ('mute' in a) return a.mute === 'toggle' ? 'Mute: toggle' : a.mute === 'on' ? 'Mute' : 'Unmute';
   return `Switch to profile “${a.profile}”`;
 }
 

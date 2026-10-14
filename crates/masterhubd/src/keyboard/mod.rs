@@ -12,7 +12,7 @@ use linux as imp;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-use windows as imp;
+use self::windows as imp;
 
 /// Sends key combinations; the OS device is created on first use.
 pub struct Keyboard {
