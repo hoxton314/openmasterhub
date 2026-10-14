@@ -1,6 +1,6 @@
 [package]
 name = "masterhubd"
-description = "Linux service for the Cooler Master MasterHUB"
+description = "Background service for the Cooler Master MasterHUB"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,6 +18,9 @@ masterhub-proto = { path = "../masterhub-proto" }
 nvml-wrapper = "0.13.0"
 serde = "1.0.229"
 serde_json = "1.0.154"
+
+# MPRIS (now playing) over D-Bus.
+[target.'cfg(not(windows))'.dependencies]
 zbus = "5.19.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -27,11 +30,25 @@ libc = "0.2.190"
 [target.'cfg(windows)'.dependencies]
 hidapi = { version = "2.6.7", default-features = false, features = ["windows-native"] }
 widestring = "1.2.1"
+# COM and WinRT: Core Audio, media sessions (now playing), WMI (LibreHardwareMonitor sensors).
+windows = { version = "0.62.2", features = [
+    "Foundation",
+    "Media_Control",
+    "Storage_Streams",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+    "Win32_System_Wmi",
+] }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Devices_DeviceAndDriverInstallation",
     "Win32_Devices_Properties",
     "Win32_System_Console",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_ProcessStatus",
     "Win32_System_SystemInformation",
     "Win32_System_Threading",

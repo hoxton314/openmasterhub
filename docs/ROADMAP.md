@@ -18,32 +18,32 @@ identical while other platforms are added.
     built by CI and attached to the release.
   - Verified in a Windows 11 VM with the modules passed through (see `docs/PROTOCOL.md`, Windows).
 
+- **Windows, W2 and the rest** (unreleased, not yet verified on hardware):
+  - widgets: `volume` through Core Audio (`audio/windows.rs`), `now_playing` through SMTC with
+    the thumbnail as cover art, `cpu_temp` and non-NVIDIA GPU widgets from
+    LibreHardwareMonitor's (or OpenHardwareMonitor's) WMI namespace while it runs
+    (`stats/windows.rs`).
+  - built-in `volume = "+2" | "40" | "{value}"` and `mute = "toggle" | "on" | "off"` actions
+    (`wpctl` on Linux, Core Audio on Windows), used by the examples and the app.
+  - first run on Windows writes `examples/starter.toml`, which uses only built-in actions.
+  - Claude Code status: the hook finds the `claude` process and the service drops sessions
+    whose process exited, as on Linux.
+  - the service log is capped at 1 MiB (one previous log kept).
+
 ## Next: finish Windows
 
-1. **W2, widgets** (`crates/masterhubd/src/stats.rs`). Today these are Linux-only:
-   - `volume`: shells out to `wpctl`. Windows: Core Audio, `IAudioEndpointVolume` on the
-     default render endpoint (level + mute).
-   - `now_playing`: MPRIS over D-Bus. Windows: SMTC,
-     `GlobalSystemMediaTransportControlsSessionManager` (title, artist, thumbnail stream).
-   - `cpu_temp`: hwmon sysfs. Windows has no reliable unprivileged source
-     (`MSAcpi_ThermalZoneTemperature` needs admin and is often fake). Options: read
-     LibreHardwareMonitor's WMI namespace when it is running, or show "n/a".
-   - `gpu_usage` / `gpu_temp`: NVML through `nvml-wrapper` should already work (it loads
-     `nvml.dll`); verify on real hardware. AMD on Windows: ADLX, or skip.
-2. **Volume actions that work on Windows.** The examples and the app's placeholder use
-   `wpctl`. Add built-in actions (e.g. `volume = "+2"`, `mute = "toggle"`) backed by PipeWire on
-   Linux and Core Audio on Windows, so configs are portable. Later: per-app volume
-   (`ISimpleAudioVolume` / PipeWire nodes), the vendor app has this too.
-3. **Verify on a real Windows PC** (the VM cannot do these):
+1. **Verify on a real Windows PC** (the VM cannot do these):
+   - the new widgets and volume actions above, with Spotify/a browser for now playing and
+     LibreHardwareMonitor for temperatures; NVML GPU widgets on an NVIDIA card.
    - socket (slot) detection from `DEVPKEY_Device_LocationPaths`: needs the Base's internal
      Prolific hubs to be visible, which a VM hides. The app's picture of the hub depends on it.
-   - installer + autostart + update over an existing install.
+   - installer + autostart + update over an existing install, and the starter config.
    - focus profiles for common exes (`msedge.exe`, `chrome.exe`, `Discord.exe`, games).
-4. **Code signing** for the installer (SmartScreen warns today). Needs a certificate decision
+   - Claude Code hooks through Git Bash with the full path from `docs/CLAUDE_CODE.md`.
+2. **Code signing** for the installer (SmartScreen warns today). Needs a certificate decision
    from the maintainer: a paid OV/EV certificate or Azure Trusted Signing. Then sign in
    `build-windows.yml`.
-5. **Windows default config / first run**: a starter profile that uses Windows actions instead
-   of `wpctl`/`playerctl` commands.
+3. **Per-app volume** (`ISimpleAudioVolume` / PipeWire nodes); the vendor app has this too.
 
 ## Then: macOS
 

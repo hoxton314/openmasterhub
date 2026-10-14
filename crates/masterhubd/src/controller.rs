@@ -349,7 +349,7 @@ impl Controller {
                 }
                 return true;
             }
-            Action::Cmd(_) | Action::Keys(_) => return false,
+            Action::Cmd(_) | Action::Keys(_) | Action::Volume(_) | Action::Mute(_) => return false,
         }
         self.anims.clear();
         self.refresh_all();
@@ -777,7 +777,24 @@ fn process_alive(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    // SAFETY: plain Win32 calls; the handle is closed before returning.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return false;
+        }
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(process, &mut code) != 0;
+        CloseHandle(process);
+        ok && code == STILL_ACTIVE as u32
+    }
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 fn process_alive(_pid: u32) -> bool {
     true
 }

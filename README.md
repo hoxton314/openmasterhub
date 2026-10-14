@@ -45,7 +45,8 @@ Click a key to set its label, colours, icon (PNG, JPEG or animated GIF) or live 
 it does on press and release:
 
 - **Keys** sends shortcuts and media keys (`ctrl+shift+t`, `playpause`, `f13`).
-- **Command** runs anything: scripts, `wpctl`, `playerctl`, `hyprctl`.
+- **Volume** and **Mute** change the default output device, on Linux and Windows alike.
+- **Command** runs anything: scripts, `playerctl`, `hyprctl`, `cmd` on Windows.
 - **Page**, **Folder**, **Back** and **Profile** move around your own layouts, so 15 keys can
   hold as many actions as you need.
 
@@ -55,7 +56,7 @@ it does on press and release:
 
 The dial has its own round screen with any widget or image, and actions for turning left, turning right and pressing.
 Each knob has a turn and a press action and its own ring colour, rollers scroll or zoom, and
-faders send their position (`{value}`) to a command.
+faders set the volume or send their position (`{value}`) to a command.
 
 ### Profiles that follow your focus
 
@@ -91,8 +92,7 @@ listed app is focused.
 ### Claude Code on the Base LED
 
 The Base light flashes when one of your Claude Code sessions needs an answer, turns green when
-a session is ready for a new prompt and blue while they work. Setup: [`docs/CLAUDE_CODE.md`](docs/CLAUDE_CODE.md)
-(Linux).
+a session is ready for a new prompt and blue while they work. Setup: [`docs/CLAUDE_CODE.md`](docs/CLAUDE_CODE.md).
 
 ## Install
 
@@ -118,7 +118,14 @@ the app launcher entry.
 
 Run the installer. It installs for your user only (no admin rights), starts the service at login
 and adds OpenMasterHUB to the Start menu. The installer is not code-signed yet, so SmartScreen
-asks once (*More info → Run anyway*). The config lives in `%APPDATA%\openmasterhub\config.toml`.
+asks once (*More info → Run anyway*). On first run the service writes a starter config to
+`%APPDATA%\openmasterhub\config.toml`, and the log goes to
+`%LOCALAPPDATA%\openmasterhub\masterhubd.log`.
+
+Volume uses Core Audio and now playing uses the Windows media sessions (Spotify, browsers and
+most players). Windows has no temperature sensors a normal user can read, so `cpu_temp` (and
+the GPU widgets without an NVIDIA driver) show values while
+[LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) runs.
 
 ### From source (Linux)
 
@@ -156,7 +163,7 @@ npm run dev          # just the UI in a browser at http://localhost:5174, with a
 
 Open **OpenMasterHUB**, click a key, knob, fader, roller or the dial, and edit it. Changes
 apply to the hardware immediately. The configuration lives in
-`~/.config/openmasterhub/config.toml`; see [`examples/config.toml`](examples/config.toml) for
+`~/.config/openmasterhub/config.toml` (Windows: `%APPDATA%\openmasterhub\config.toml`); see [`examples/config.toml`](examples/config.toml) for
 every option. The service reloads the file when it is edited by hand.
 
 ## Components

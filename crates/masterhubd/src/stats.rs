@@ -2,7 +2,9 @@
 //! for widgets currently on screen.
 
 use std::collections::HashMap;
+#[cfg(not(windows))]
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::process::Command;
 
 use image::RgbaImage;
@@ -11,13 +13,25 @@ use masterhub_core::render::LiveData;
 use nvml_wrapper::Nvml;
 use nvml_wrapper::enum_wrappers::device::TemperatureSensor;
 
+use crate::audio;
+
+#[cfg(windows)]
+mod windows;
+
 pub struct Stats {
     cpu_prev: Option<(u64, u64)>,
     nvml: Option<Nvml>,
+    #[cfg(not(windows))]
     cpu_temp_path: Option<PathBuf>,
+    #[cfg(not(windows))]
     amd_gpu: Option<PathBuf>,
     art_cache: HashMap<String, Option<RgbaImage>>,
+    #[cfg(not(windows))]
     session: Option<zbus::blocking::Connection>,
+    #[cfg(windows)]
+    media: self::windows::Media,
+    #[cfg(windows)]
+    sensors: self::windows::Sensors,
 }
 
 impl Stats {
@@ -29,10 +43,17 @@ impl Stats {
         Self {
             cpu_prev: None,
             nvml,
+            #[cfg(not(windows))]
             cpu_temp_path: find_cpu_temp(),
+            #[cfg(not(windows))]
             amd_gpu: find_amd_gpu(),
             art_cache: HashMap::new(),
+            #[cfg(not(windows))]
             session: zbus::blocking::Connection::session().ok(),
+            #[cfg(windows)]
+            media: self::windows::Media::new(),
+            #[cfg(windows)]
+            sensors: self::windows::Sensors::new(),
         }
     }
 
@@ -66,7 +87,7 @@ impl Stats {
                 gauge(f, format!("{:.0}%", f * 100.0), "RAM")
             }
             Widget::CpuTemp => {
-                let t = read_millideg(self.cpu_temp_path.as_deref()?)?;
+                let t = self.cpu_temp()?;
                 gauge(t / 100.0, format!("{t:.0}°"), "CPU")
             }
             Widget::GpuUsage => {
@@ -78,7 +99,7 @@ impl Stats {
                 gauge(t / 100.0, format!("{t:.0}°"), "GPU")
             }
             Widget::Volume => {
-                let (v, muted) = volume()?;
+                let (v, muted) = audio::get()?;
                 let text = if muted { "Muted".to_owned() } else { format!("{:.0}%", v * 100.0) };
                 gauge(if muted { 0.0 } else { v }, text, "Volume")
             }
@@ -94,22 +115,63 @@ impl Stats {
         (dt > 0).then(|| 1.0 - idle.saturating_sub(pi) as f32 / dt as f32)
     }
 
-    fn gpu_usage(&self) -> Option<f32> {
+    fn gpu_usage(&mut self) -> Option<f32> {
         if let Some(nvml) = &self.nvml {
             return Some(nvml.device_by_index(0).ok()?.utilization_rates().ok()?.gpu as f32 / 100.0);
         }
-        let s = std::fs::read_to_string(self.amd_gpu.as_ref()?.join("gpu_busy_percent")).ok()?;
-        Some(s.trim().parse::<f32>().ok()? / 100.0)
+        #[cfg(windows)]
+        {
+            self.sensors.read(self::windows::Sensor::GpuLoad)
+        }
+        #[cfg(not(windows))]
+        {
+            let s = std::fs::read_to_string(self.amd_gpu.as_ref()?.join("gpu_busy_percent")).ok()?;
+            Some(s.trim().parse::<f32>().ok()? / 100.0)
+        }
     }
 
-    fn gpu_temp(&self) -> Option<f32> {
+    fn gpu_temp(&mut self) -> Option<f32> {
         if let Some(nvml) = &self.nvml {
             return Some(nvml.device_by_index(0).ok()?.temperature(TemperatureSensor::Gpu).ok()? as f32);
         }
-        let hwmon = std::fs::read_dir(self.amd_gpu.as_ref()?.join("hwmon")).ok()?.flatten().next()?.path();
-        read_millideg(&hwmon.join("temp1_input"))
+        #[cfg(windows)]
+        {
+            self.sensors.read(self::windows::Sensor::GpuTemp)
+        }
+        #[cfg(not(windows))]
+        {
+            let hwmon = std::fs::read_dir(self.amd_gpu.as_ref()?.join("hwmon")).ok()?.flatten().next()?.path();
+            read_millideg(&hwmon.join("temp1_input"))
+        }
     }
 
+    /// Linux: hwmon. Windows: LibreHardwareMonitor, while it runs.
+    fn cpu_temp(&mut self) -> Option<f32> {
+        #[cfg(windows)]
+        {
+            self.sensors.read(self::windows::Sensor::CpuTemp)
+        }
+        #[cfg(not(windows))]
+        {
+            read_millideg(self.cpu_temp_path.as_deref()?)
+        }
+    }
+
+    /// The playing (or most recent) media session, with its cover art.
+    #[cfg(windows)]
+    fn now_playing(&mut self) -> Option<LiveData> {
+        let p = self.media.playing()?;
+        if p.title.is_empty() && p.artist.is_empty() {
+            return None;
+        }
+        // Players often set the thumbnail after the title, so its presence is part of the key.
+        let key = format!("smtc:{}\n{}\n{}", p.title, p.artist, p.thumbnail.is_some());
+        let thumbnail = p.thumbnail;
+        let art = self.art_cached(&key, || image::load_from_memory(&self::windows::read_thumbnail(thumbnail.as_ref()?)?).ok());
+        Some(LiveData::Media { title: p.title, artist: p.artist, art })
+    }
+
+    #[cfg(not(windows))]
     fn now_playing(&mut self) -> Option<LiveData> {
         let conn = self.session.as_ref()?;
         let dbus = zbus::blocking::fdo::DBusProxy::new(conn).ok()?;
@@ -150,27 +212,34 @@ impl Stats {
     }
 
     /// Cover art from `file://` or `http(s)://` (fetched once with curl and cached).
+    #[cfg(not(windows))]
     fn art(&mut self, url: &str) -> Option<RgbaImage> {
-        if let Some(cached) = self.art_cache.get(url) {
+        self.art_cached(url, || {
+            if let Some(path) = url.strip_prefix("file://") {
+                image::open(percent_decode(path)).ok()
+            } else if url.starts_with("http://") || url.starts_with("https://") {
+                Command::new("curl")
+                    .args(["-sfL", "--max-time", "3", url])
+                    .output()
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .and_then(|o| image::load_from_memory(&o.stdout).ok())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Cover art by `key`, loaded once, scaled to the dial and cached.
+    fn art_cached(&mut self, key: &str, load: impl FnOnce() -> Option<image::DynamicImage>) -> Option<RgbaImage> {
+        if let Some(cached) = self.art_cache.get(key) {
             return cached.clone();
         }
-        let img = if let Some(path) = url.strip_prefix("file://") {
-            image::open(percent_decode(path)).ok()
-        } else if url.starts_with("http://") || url.starts_with("https://") {
-            Command::new("curl")
-                .args(["-sfL", "--max-time", "3", url])
-                .output()
-                .ok()
-                .filter(|o| o.status.success())
-                .and_then(|o| image::load_from_memory(&o.stdout).ok())
-        } else {
-            None
-        };
-        let img = img.map(|i| i.resize(240, 240, image::imageops::FilterType::Triangle).to_rgba8());
+        let img = load().map(|i| i.resize(240, 240, image::imageops::FilterType::Triangle).to_rgba8());
         if self.art_cache.len() > 32 {
             self.art_cache.clear();
         }
-        self.art_cache.insert(url.to_owned(), img.clone());
+        self.art_cache.insert(key.to_owned(), img.clone());
         img
     }
 }
@@ -218,19 +287,13 @@ fn ram_usage() -> Option<f32> {
     Some(1.0 - avail / total)
 }
 
-/// `wpctl get-volume @DEFAULT_AUDIO_SINK@` → "Volume: 0.45 [MUTED]"
-fn volume() -> Option<(f32, bool)> {
-    let out = Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SINK@"]).output().ok()?;
-    let s = String::from_utf8(out.stdout).ok()?;
-    let v: f32 = s.split_whitespace().nth(1)?.parse().ok()?;
-    Some((v.min(1.0), s.contains("MUTED")))
-}
-
+#[cfg(not(windows))]
 fn read_millideg(path: &Path) -> Option<f32> {
     Some(std::fs::read_to_string(path).ok()?.trim().parse::<f32>().ok()? / 1000.0)
 }
 
 /// CPU package temperature: k10temp (AMD) Tctl or coretemp (Intel) package.
+#[cfg(not(windows))]
 fn find_cpu_temp() -> Option<PathBuf> {
     for dir in std::fs::read_dir("/sys/class/hwmon").ok()?.flatten() {
         let name = std::fs::read_to_string(dir.path().join("name")).unwrap_or_default();
@@ -241,6 +304,7 @@ fn find_cpu_temp() -> Option<PathBuf> {
     None
 }
 
+#[cfg(not(windows))]
 fn find_amd_gpu() -> Option<PathBuf> {
     std::fs::read_dir("/sys/class/drm")
         .ok()?
@@ -249,6 +313,7 @@ fn find_amd_gpu() -> Option<PathBuf> {
         .find(|d| d.join("gpu_busy_percent").exists())
 }
 
+#[cfg(not(windows))]
 fn percent_decode(s: &str) -> String {
     let b = s.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -272,6 +337,7 @@ fn percent_decode(s: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(not(windows))]
     #[test]
     fn decodes_file_urls() {
         assert_eq!(percent_decode("/tmp/My%20Song.jpg"), "/tmp/My Song.jpg");
@@ -279,7 +345,7 @@ mod tests {
 
     #[test]
     fn cpu_usage_needs_two_samples() {
-        let mut s = Stats { cpu_prev: None, nvml: None, cpu_temp_path: None, amd_gpu: None, art_cache: HashMap::new(), session: None };
+        let mut s = Stats::new();
         assert!(s.cpu_usage().is_none());
         std::thread::sleep(std::time::Duration::from_millis(50));
         let v = s.cpu_usage().unwrap();

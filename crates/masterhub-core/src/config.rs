@@ -375,6 +375,50 @@ pub enum Action {
     Back(bool),
     /// Switch to a profile by name.
     Profile(String),
+    /// Output volume of the default device: `"+2"`/`"-2"` change it by percentage points,
+    /// `"40"` sets it, `"{value}"` follows a fader.
+    Volume(String),
+    /// Mute the default output device: `toggle`, `on` or `off`.
+    Mute(Mute),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Mute {
+    Toggle,
+    On,
+    Off,
+}
+
+/// A parsed `volume` action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VolumeChange {
+    /// Change by percentage points.
+    By(i32),
+    /// Set to a percentage.
+    To(u8),
+}
+
+impl VolumeChange {
+    /// Parse a `volume` action, with `value` (a fader position) substituted for `{value}`.
+    pub fn parse(s: &str, value: Option<u8>) -> Option<Self> {
+        let s = s.trim().replace("{value}", &value.unwrap_or(0).to_string());
+        if let Some(n) = s.strip_prefix('+') {
+            return Some(Self::By(n.trim().parse().ok()?));
+        }
+        if let Some(n) = s.strip_prefix('-') {
+            return Some(Self::By(-n.trim().parse::<i32>().ok()?));
+        }
+        s.parse::<u8>().ok().filter(|v| *v <= 100).map(Self::To)
+    }
+
+    /// The new level (0.0..=1.0) from the current one.
+    pub fn apply(self, current: f32) -> f32 {
+        match self {
+            Self::By(d) => (current + d as f32 / 100.0).clamp(0.0, 1.0),
+            Self::To(v) => v as f32 / 100.0,
+        }
+    }
 }
 
 /// `"#rrggbb"`
@@ -487,6 +531,9 @@ impl Config {
                         if pg != "next" && pg != "prev" && !p.pages.iter().any(|x| &x.name == pg) =>
                     {
                         bail!("{}: page {pg:?} does not exist", p.name)
+                    }
+                    Action::Volume(v) if VolumeChange::parse(v, None).is_none() => {
+                        bail!("{}: volume {v:?} must be like \"+2\", \"-2\", \"40\" or \"{{value}}\"", p.name)
                     }
                     _ => {}
                 }
@@ -627,6 +674,27 @@ mod tests {
         assert!(Config::parse(bad_folder, Path::new("/")).is_err());
         let bad_index = "[[profile]]\nname='A'\n[[profile.page]]\nname='P'\n[[profile.page.key]]\nindex=15\n";
         assert!(Config::parse(bad_index, Path::new("/")).is_err());
+        let bad_volume = "[[profile]]\nname='A'\n[profile.dial]\ncw={volume='up'}\n";
+        assert!(Config::parse(bad_volume, Path::new("/")).is_err());
+    }
+
+    #[test]
+    fn starter_config_parses() {
+        let cfg = Config::parse(include_str!("../../../examples/starter.toml"), Path::new("/x")).unwrap();
+        assert_eq!(cfg.profiles[0].dial.as_ref().unwrap().press, Some(Action::Mute(Mute::Toggle)));
+    }
+
+    #[test]
+    fn volume_changes() {
+        assert_eq!(VolumeChange::parse("+2", None), Some(VolumeChange::By(2)));
+        assert_eq!(VolumeChange::parse("-5", None), Some(VolumeChange::By(-5)));
+        assert_eq!(VolumeChange::parse("40", None), Some(VolumeChange::To(40)));
+        assert_eq!(VolumeChange::parse("{value}", Some(73)), Some(VolumeChange::To(73)));
+        assert_eq!(VolumeChange::parse("101", None), None);
+        assert_eq!(VolumeChange::parse("up", None), None);
+        assert_eq!(VolumeChange::By(5).apply(0.98), 1.0);
+        assert_eq!(VolumeChange::By(-10).apply(0.05), 0.0);
+        assert_eq!(VolumeChange::To(50).apply(0.9), 0.5);
     }
 
     #[test]

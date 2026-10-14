@@ -74,7 +74,46 @@ fn claude_pid() -> Option<u32> {
     None
 }
 
-#[cfg(not(target_os = "linux"))]
+/// The Claude Code process: the first ancestor that is not a shell (hooks run through Git Bash,
+/// `cmd` or PowerShell).
+#[cfg(windows)]
+fn claude_pid() -> Option<u32> {
+    use std::collections::HashMap;
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
+    const SHELLS: [&str; 8] = ["sh", "bash", "dash", "zsh", "fish", "cmd", "powershell", "pwsh"];
+
+    // pid → (parent pid, exe name without .exe, lower-case)
+    let mut procs = HashMap::new();
+    // SAFETY: plain Win32 calls; the entry is plain data with dwSize set, the snapshot is closed.
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut e: PROCESSENTRY32W = std::mem::zeroed();
+        e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut ok = Process32FirstW(snap, &mut e) != 0;
+        while ok {
+            let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+            let name = String::from_utf16_lossy(&e.szExeFile[..len]).to_ascii_lowercase();
+            procs.insert(e.th32ProcessID, (e.th32ParentProcessID, name.trim_end_matches(".exe").to_owned()));
+            ok = Process32NextW(snap, &mut e) != 0;
+        }
+        CloseHandle(snap);
+    }
+    let mut pid = procs.get(&std::process::id())?.0;
+    for _ in 0..8 {
+        let (parent, name) = procs.get(&pid)?;
+        if !SHELLS.contains(&name.as_str()) {
+            return Some(pid);
+        }
+        pid = *parent;
+    }
+    None
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 fn claude_pid() -> Option<u32> {
     None
 }
