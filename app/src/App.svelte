@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { AppWindow, ChevronRight, Folder, LayoutGrid, Power } from 'lucide-svelte';
+  import { AppWindow, ChevronRight, Folder, LayoutGrid, Power, RotateCw } from 'lucide-svelte';
   import Dialog from './components/Dialog.svelte';
   import Hub from './components/Hub.svelte';
   import Inspector from './components/Inspector.svelte';
@@ -13,6 +13,14 @@
   const page = $derived(currentPage());
   const inFolder = $derived(!!profile?.folder?.some((f) => f.name === page?.name));
   const focused = $derived(hub.state.active_app?.split('.').pop());
+
+  let restarting = $state(false);
+  async function restartService() {
+    restarting = true;
+    toast('Restarting the service…');
+    await invoke('restart_service').catch((e) => toast(String(e)));
+    restarting = false;
+  }
 </script>
 
 <div class="app">
@@ -35,9 +43,12 @@
             {page?.name ?? 'Main'}
           </span>
         </div>
-        {#if focused}
-          <span class="chip" title="Focused application (picks the profile)"><AppWindow size={12} />{focused}</span>
-        {/if}
+        <div class="tools">
+          {#if focused}
+            <span class="chip" title="Focused application (picks the profile)"><AppWindow size={12} />{focused}</span>
+          {/if}
+          <button class="btn ghost sm icon" title="Restart service" disabled={restarting} onclick={restartService}><RotateCw size={14} /></button>
+        </div>
       </div>
       <div class="stage">
         <div class="canvas"><Hub /></div>
@@ -79,6 +90,11 @@
     align-items: center;
     gap: 6px;
     font-weight: 500;
+  }
+  .tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
   .chip {
     display: inline-flex;
