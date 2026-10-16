@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Clock, Cpu, Gpu, ImagePlus, MemoryStick, Music2, Thermometer, Volume2, X } from 'lucide-svelte';
+  import { Bot, Clock, Cpu, Gpu, ImagePlus, MemoryStick, Music2, Thermometer, Volume2, X } from 'lucide-svelte';
   import { invoke, pickImage } from '../lib/backend';
   import ColorField from './ColorField.svelte';
   import type { Face, Widget } from '../lib/types';
@@ -21,7 +21,9 @@
     { k: 'gpu_temp', label: 'GPU temp', icon: Thermometer },
     { k: 'volume', label: 'Volume', icon: Volume2 },
     { k: 'now_playing', label: 'Playing', icon: Music2 },
+    { k: 'claude_session', label: 'Claude', icon: Bot },
   ] as const;
+  const SLOTS = Array.from({ length: 15 }, (_, i) => i);
 
   let preview = $state('');
   $effect(() => {
@@ -82,9 +84,23 @@
       </button>
     {/each}
   </div>
+  {#if face.widget?.kind === 'claude_session'}
+    {@const slot = face.widget.slot ?? 0}
+    <div class="field">
+      <span class="label">Session</span>
+      <select class="select" value={String(slot)} onchange={(e) => { const v = Number(e.currentTarget.value); onchange((f) => (f.widget = { kind: 'claude_session', slot: v })); }}>
+        {#each SLOTS as n}<option value={String(n)}>Session {n + 1}</option>{/each}
+      </select>
+    </div>
+    <p class="hint">Shows that Claude Code session (oldest first): its name and the mascot, on a background in the colour of its status. Pair it with the Claude action to bring the session up.</p>
+  {/if}
 </div>
 
 <style>
+  .hint {
+    font-size: 11.5px;
+    color: var(--text-3);
+  }
   .previews {
     display: flex;
     justify-content: center;

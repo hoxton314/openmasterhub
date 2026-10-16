@@ -30,6 +30,10 @@ identical while other platforms are added.
     whose process exited, as on Linux.
   - the service log is capped at 1 MiB (one previous log kept).
 
+- **Claude Code session keys** (unreleased): `claude_session` widget and `session` action, a
+  Claude profile in `examples/config.toml`. Bringing up terminal sessions on Windows
+  (`SetForegroundWindow`) is untested.
+
 ## Next: finish Windows
 
 1. **Verify on a real Windows PC** (the VM cannot do these):
