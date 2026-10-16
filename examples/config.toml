@@ -13,7 +13,7 @@
 #   { page = "next" | "prev" | "<page name>" }
 #   { folder = "<folder name>" }    open a keypad folder
 #   { back = true }                 leave the folder (outside a folder: back to the profile
-#                                   of the focused app, after a profile key)
+#                                   shown before)
 #   { profile = "<profile name>" }  switch profile
 #   { session = 0 }                 bring up a Claude Code session by slot (see the widget)
 #
@@ -289,4 +289,4 @@ press = { cmd = "xdg-open claude://code/new" }   # Windows: start claude://code/
 index = 14
 label = "Back"
 background = "#3a3a46"
-press = { back = true }   # back to the profile of the focused app
+press = { back = true }   # back to the profile shown before

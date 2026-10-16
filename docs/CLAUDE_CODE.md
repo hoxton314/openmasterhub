@@ -82,7 +82,7 @@ press = { session = 0 }
 ```
 
 `examples/config.toml` has a ready-made **Claude** profile: thirteen session keys, *New*
-(`claude://code/new`) and *Back*, which returns to the profile of the app you are in. It
+(`claude://code/new`) and *Back*, which returns to the profile shown before. It
 activates while the Claude app is focused, and a pinned *Claude* key on every page of every
 profile switches to it from anywhere:
 

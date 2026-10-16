@@ -88,6 +88,8 @@ pub struct Controller {
     pictures: HashMap<(PathBuf, u32), Option<Rc<Picture>>>,
     modules: BTreeMap<String, Module>,
     profile: usize,
+    /// The profile shown before the current one, for `back` outside a folder.
+    previous_profile: Option<usize>,
     page: usize,
     folders: Vec<String>,
     /// Last orientation reported by the Base's sensor, if any.
@@ -138,6 +140,7 @@ impl Controller {
             pictures: HashMap::new(),
             modules: BTreeMap::new(),
             profile: 0,
+            previous_profile: None,
             page: 0,
             folders: Vec::new(),
             sensor_horizontal: None,
@@ -286,6 +289,7 @@ impl Controller {
         self.anims.clear();
         // Keep the user where they were if that still exists.
         self.profile = old_profile.and_then(|n| self.config.profiles.iter().position(|p| p.name == n)).unwrap_or(0);
+        self.previous_profile = None;
         let pages = self.profile_ref().map(|p| p.pages.as_slice()).unwrap_or_default();
         self.page = old_page.and_then(|n| pages.iter().position(|p| p.name == n)).unwrap_or(0);
         let folders = self.profile_ref().map(|p| p.folders.clone()).unwrap_or_default();
@@ -331,6 +335,9 @@ impl Controller {
         if index >= self.config.profiles.len() {
             return;
         }
+        if index != self.profile {
+            self.previous_profile = Some(self.profile);
+        }
         self.profile = index;
         self.page = 0;
         self.folders.clear();
@@ -374,12 +381,13 @@ impl Controller {
                 self.folders.clear();
             }
             Action::Folder(name) => self.folders.push(name.clone()),
-            // Out of a folder, or out of a profile switched to by hand (a pinned Claude key)
-            // back to the one for the focused app.
+            // Outside a folder: back to the profile shown before this one (the app's profile
+            // after a pinned Claude key, or the one before the Claude app was focused), else
+            // the profile of the focused app, else the default.
             Action::Back(_) if self.folders.is_empty() => {
-                let target = self.config.profile_for_app(self.active_app.as_deref().unwrap_or_default());
-                if target != self.profile {
-                    self.switch_profile(target);
+                let app = self.config.profile_for_app(self.active_app.as_deref().unwrap_or_default());
+                if let Some(t) = back_target(self.profile, self.previous_profile, app, self.config.profiles.len()) {
+                    self.switch_profile(t);
                 }
                 return true;
             }
@@ -938,6 +946,30 @@ pub fn process_alive(_pid: u32) -> bool {
     true
 }
 
+/// Where `back` outside a folder goes from profile `current`: the previous profile, else the
+/// focused app's, else the default; never the current one.
+fn back_target(current: usize, previous: Option<usize>, app: usize, profiles: usize) -> Option<usize> {
+    [previous, Some(app), Some(0)].into_iter().flatten().find(|&i| i != current && i < profiles)
+}
+
 fn mtime(path: &std::path::Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn back_leaves_the_profile() {
+        // Pinned Claude key pressed in Ghostty (1): back to Ghostty.
+        assert_eq!(back_target(5, Some(1), 1, 6), Some(1));
+        // Claude app focused (its profile 5 came from focus), Discord (2) before it.
+        assert_eq!(back_target(5, Some(2), 5, 6), Some(2));
+        // Nothing before: the default profile.
+        assert_eq!(back_target(5, None, 5, 6), Some(0));
+        // A previous profile that no longer exists is skipped.
+        assert_eq!(back_target(5, Some(9), 5, 6), Some(0));
+        assert_eq!(back_target(0, None, 0, 1), None);
+    }
 }
