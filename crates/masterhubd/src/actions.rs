@@ -55,8 +55,8 @@ fn run(rx: Receiver<Request>) {
                         log::error!("mute {m:?}: {e:#}");
                     }
                 }
-                // Navigation is handled by the controller and never reaches this thread.
-                Action::Page(_) | Action::Folder(_) | Action::Back(_) | Action::Profile(_) => {}
+                // Navigation and sessions are handled by the controller and never reach this thread.
+                Action::Page(_) | Action::Folder(_) | Action::Back(_) | Action::Profile(_) | Action::Session(_) => {}
                 Action::Cmd(cmd) => {
                     let cmd = match req.value {
                         Some(v) => cmd.replace("{value}", &v.to_string()),

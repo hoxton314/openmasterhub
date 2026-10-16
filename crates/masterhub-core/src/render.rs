@@ -12,6 +12,7 @@ use image::{AnimationDecoder, DynamicImage, Rgb, RgbImage, RgbaImage};
 use masterhub_proto::Rgb as Color;
 
 use crate::config::Face;
+use crate::ipc::Status;
 
 /// Size of a keypad key image.
 pub const KEY_SIZE: u32 = 72;
@@ -27,6 +28,9 @@ pub enum LiveData {
     Text { text: String, caption: Option<String> },
     /// Now playing.
     Media { title: String, artist: String, art: Option<RgbaImage> },
+    /// A Claude Code session: the mascot in the pose and colour of its status, and its name.
+    /// `frame` advances the working animation and flashes the attention pose (odd = dark).
+    Session { name: String, status: Status, color: Color, frame: u32 },
 }
 
 /// A decoded image or animation from a face's `image` path.
@@ -115,6 +119,16 @@ impl Renderer {
                 self.text(&mut img, title, s * 0.72, s * 0.15, s * 0.9, fg);
                 self.text(&mut img, artist, s * 0.87, s * 0.11, s * 0.9, dim(fg));
             }
+            Some(LiveData::Session { name, status, color, frame }) => {
+                let flash_off = *status == Status::Attention && frame % 2 == 1;
+                if *status == Status::Attention && !flash_off {
+                    let glow = mix(bg, *color, 0.3);
+                    img = RgbImage::from_pixel(size, size, Rgb([glow.r, glow.g, glow.b]));
+                }
+                let body = if flash_off { dim(*color) } else { *color };
+                draw_mascot(&mut img, mascot(*status, *frame), body, s * 0.05, s * 0.6);
+                self.two_lines(&mut img, name, s * 0.83, s * 0.15, s * 0.92, fg);
+            }
             None => {
                 if let Some(pic) = picture {
                     let (x, y) = ((size.saturating_sub(pic.width())) / 2, (size.saturating_sub(pic.height())) / 2);
@@ -151,14 +165,37 @@ impl Renderer {
         Ok(out)
     }
 
+    /// Width of `text` at `px`.
+    fn measure(&self, text: &str, px: f32) -> f32 {
+        let Some(font) = &self.font else { return 0.0 };
+        let f = font.as_scaled(PxScale::from(px));
+        text.chars().map(|c| f.h_advance(f.glyph_id(c))).sum()
+    }
+
+    /// Draw `text` word-wrapped into at most two lines of `px` centred around `center_y`; a
+    /// single line may shrink a little first, the second line ends in `…` if cut.
+    fn two_lines(&self, img: &mut RgbImage, text: &str, center_y: f32, px: f32, max_width: f32, fg: Color) {
+        let text = text.trim();
+        if self.font.is_none() || text.is_empty() {
+            return;
+        }
+        if self.measure(text, px * 0.8) <= max_width {
+            self.text(img, text, center_y - px * 0.1, px, max_width, fg);
+            return;
+        }
+        let lines = wrap(text, 2, |t| self.measure(t, px) <= max_width);
+        let step = px * 1.05;
+        let top = center_y - step * (lines.len() as f32 - 1.0) / 2.0;
+        for (i, line) in lines.iter().enumerate() {
+            self.text(img, line, top + step * i as f32, px, max_width, fg);
+        }
+    }
+
     /// Draw `text` centred at `center_y`, starting at `px` and shrinking to fit `max_width`.
     fn text(&self, img: &mut RgbImage, text: &str, center_y: f32, px: f32, max_width: f32, fg: Color) {
         let Some(font) = &self.font else { return };
         let width = img.width() as f32;
-        let measure = |px: f32| {
-            let f = font.as_scaled(PxScale::from(px));
-            text.chars().map(|c| f.h_advance(f.glyph_id(c))).sum::<f32>()
-        };
+        let measure = |px: f32| self.measure(text, px);
         let mut px = px;
         while measure(px) > max_width && px > 7.0 {
             px -= 1.0;
@@ -185,6 +222,140 @@ impl Renderer {
             });
         }
     }
+}
+
+/// Split `text` into at most `max_lines` lines that `fits`, breaking at spaces (or inside a
+/// word too long for a line); the last line ends in `…` when text is left over.
+fn wrap(text: &str, max_lines: usize, fits: impl Fn(&str) -> bool) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut rest: Vec<char> = text.chars().collect();
+    while !rest.is_empty() && lines.len() < max_lines {
+        let last = lines.len() + 1 == max_lines;
+        let all: String = rest.iter().collect();
+        if fits(&all) {
+            lines.push(all);
+            rest.clear();
+            break;
+        }
+        // Longest prefix that fits, with room for the ellipsis on the last line.
+        let mut n = rest.len();
+        while n > 1 {
+            let mut cand: String = rest[..n].iter().collect();
+            if last {
+                cand = format!("{}…", cand.trim_end());
+            }
+            if fits(&cand) {
+                break;
+            }
+            n -= 1;
+        }
+        // Prefer breaking after a space unless that wastes most of the line.
+        if !last && let Some(sp) = rest[..n].iter().rposition(|c| *c == ' ').filter(|&sp| sp * 2 >= n && n < rest.len()) {
+            n = sp + 1;
+        }
+        let line: String = rest[..n].iter().collect::<String>().trim().to_owned();
+        rest.drain(..n);
+        while rest.first() == Some(&' ') {
+            rest.remove(0);
+        }
+        lines.push(if last && !rest.is_empty() { format!("{line}…") } else { line });
+    }
+    lines
+}
+
+/// Claude Code mascot poses, 14×11 cells: `#` body, `o` eye.
+const MASCOT_READY: [&str; 11] = [
+    "..............",
+    "...########...",
+    "..##########..",
+    "..##o####o##..",
+    "..##o####o##..",
+    "..##########..",
+    ".############.",
+    "#.##########.#",
+    "#.##########.#",
+    "...##....##...",
+    "...##....##...",
+];
+/// Working, two frames: eyes down on the work, arms typing.
+const MASCOT_WORKING: [[&str; 11]; 2] = [
+    [
+        "..............",
+        "...########...",
+        "..##########..",
+        "..##########..",
+        "..##oo##oo##..",
+        "..##########..",
+        "..##########..",
+        "##############",
+        "..##########..",
+        "...##....##...",
+        "...##....##...",
+    ],
+    [
+        "..............",
+        "...########...",
+        "..##########..",
+        "..##########..",
+        "..##oo##oo##..",
+        "..##########..",
+        "##############",
+        "..##########..",
+        "..##########..",
+        "...##....##...",
+        "...##....##...",
+    ],
+];
+/// Waiting for you: waving, eyes wide.
+const MASCOT_ATTENTION: [&str; 11] = [
+    ".............#",
+    "...########..#",
+    "..##########.#",
+    "..##oo##oo####",
+    "..##oo##oo##..",
+    "..##########..",
+    ".###########..",
+    "#.##########..",
+    "#.##########..",
+    "...##....##...",
+    "...##....##...",
+];
+
+fn mascot(status: Status, frame: u32) -> &'static [&'static str; 11] {
+    match status {
+        Status::Ready => &MASCOT_READY,
+        Status::Working => &MASCOT_WORKING[frame as usize % 2],
+        Status::Attention => &MASCOT_ATTENTION,
+    }
+}
+
+/// Draw a sprite centred horizontally, `top` from the top edge and at most `height` tall;
+/// eyes are left in the background colour.
+fn draw_mascot(img: &mut RgbImage, sprite: &[&str; 11], body: Color, top: f32, height: f32) {
+    let size = img.width();
+    let cell = ((height / sprite.len() as f32) as u32).max(1);
+    let w = sprite[0].len() as u32 * cell;
+    let (x0, y0) = ((size.saturating_sub(w)) / 2, top as u32);
+    for (row, line) in sprite.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            if ch != '#' {
+                continue;
+            }
+            for dy in 0..cell {
+                for dx in 0..cell {
+                    let (x, y) = (x0 + col as u32 * cell + dx, y0 + row as u32 * cell + dy);
+                    if x < size && y < img.height() {
+                        img.put_pixel(x, y, Rgb([body.r, body.g, body.b]));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn mix(a: Color, b: Color, t: f32) -> Color {
+    let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t) as u8;
+    Color::new(m(a.r, b.r), m(a.g, b.g), m(a.b, b.b))
 }
 
 fn dim(c: Color) -> Color {
@@ -298,5 +469,26 @@ mod tests {
         };
         assert_eq!(lit(0.0), 0);
         assert!(lit(0.5) > 0 && lit(0.5) < lit(0.55) * 2);
+    }
+
+    #[test]
+    fn wraps_long_names() {
+        let fits = |t: &str| t.chars().count() <= 10;
+        assert_eq!(wrap("openmasterhub", 2, fits), ["openmaster", "hub"]);
+        assert_eq!(wrap("openmasterhub-protocol", 2, fits), ["openmaster", "hub-proto…"]);
+        assert_eq!(wrap("short", 2, fits), ["short"]);
+        assert_eq!(wrap("Wire the CLI sandbox into", 2, fits), ["Wire the", "CLI sandb…"]);
+        assert_eq!(wrap("Take a look at", 2, fits), ["Take a", "look at"]);
+    }
+
+    #[test]
+    fn mascot_takes_status_colour() {
+        let r = Renderer { font: None };
+        let color = Color::new(0, 255, 64);
+        for status in [Status::Working, Status::Ready, Status::Attention] {
+            let live = LiveData::Session { name: "x".into(), status, color, frame: 0 };
+            let img = r.render_rgb(&Face::default(), KEY_SIZE, None, Some(&live));
+            assert!(img.pixels().filter(|p| p.0 == [0, 255, 64]).count() > 300, "{status:?}");
+        }
     }
 }

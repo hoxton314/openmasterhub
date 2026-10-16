@@ -201,6 +201,7 @@ export function describe(a: Action | undefined): string {
     return /^[+-]/.test(a.volume) ? `Volume ${a.volume}%` : `Volume: set to ${a.volume}%`;
   }
   if ('mute' in a) return a.mute === 'toggle' ? 'Mute: toggle' : a.mute === 'on' ? 'Mute' : 'Unmute';
+  if ('session' in a) return `Open Claude session ${a.session + 1}`;
   return `Switch to profile “${a.profile}”`;
 }
 

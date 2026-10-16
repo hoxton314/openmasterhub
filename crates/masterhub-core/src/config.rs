@@ -253,10 +253,16 @@ pub enum Widget {
     Volume,
     /// MPRIS: title, artist and cover art of the active player.
     NowPlaying,
+    /// The Claude Code session in this slot (0 = the oldest open session): its name and status.
+    /// Empty slots show the face as configured.
+    ClaudeSession {
+        #[serde(default)]
+        slot: u8,
+    },
 }
 
 impl Widget {
-    pub const ALL: [Widget; 8] = [
+    pub const ALL: [Widget; 9] = [
         Widget::Clock { format: None },
         Widget::CpuUsage,
         Widget::CpuTemp,
@@ -265,6 +271,7 @@ impl Widget {
         Widget::GpuTemp,
         Widget::Volume,
         Widget::NowPlaying,
+        Widget::ClaudeSession { slot: 0 },
     ];
 
     pub fn title(&self) -> &'static str {
@@ -277,6 +284,7 @@ impl Widget {
             Self::GpuTemp => "GPU temperature",
             Self::Volume => "Volume",
             Self::NowPlaying => "Now playing",
+            Self::ClaudeSession { .. } => "Claude Code session",
         }
     }
 }
@@ -380,6 +388,8 @@ pub enum Action {
     Volume(String),
     /// Mute the default output device: `toggle`, `on` or `off`.
     Mute(Mute),
+    /// Bring up the Claude Code session in this slot (see `Widget::ClaudeSession`).
+    Session(u8),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -638,6 +648,10 @@ mod tests {
         assert!(!cfg.profiles[0].pages.is_empty());
         let again = Config::parse(&cfg.to_toml().unwrap(), Path::new("/x")).unwrap();
         assert_eq!(cfg, again);
+        let claude = cfg.profiles.iter().find(|p| p.name == "Claude").unwrap();
+        let key = claude.pages[0].key(2).unwrap();
+        assert_eq!(key.face.widget, Some(Widget::ClaudeSession { slot: 2 }));
+        assert_eq!(key.press, Some(Action::Session(2)));
     }
 
     #[test]

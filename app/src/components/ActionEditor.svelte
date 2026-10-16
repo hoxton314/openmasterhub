@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ArrowLeft, ArrowRight, Ban, ChevronDown, CornerUpLeft, Folder, Keyboard, LayoutGrid, Terminal, UserRound, Volume2, VolumeX } from 'lucide-svelte';
+  import { ArrowLeft, ArrowRight, Ban, Bot, ChevronDown, CornerUpLeft, Folder, Keyboard, LayoutGrid, Terminal, UserRound, Volume2, VolumeX } from 'lucide-svelte';
   import { currentProfile, describe, hub } from '../lib/hub.svelte';
   import type { Action, Mute } from '../lib/types';
 
@@ -18,7 +18,10 @@
     { k: 'folder', label: 'Folder', icon: Folder },
     { k: 'back', label: 'Back', icon: CornerUpLeft },
     { k: 'profile', label: 'Profile', icon: UserRound },
+    { k: 'session', label: 'Claude', icon: Bot },
   ] as const;
+  /** Claude Code session slots, one per key. */
+  const SLOTS = Array.from({ length: 15 }, (_, i) => i);
   type Kind = (typeof KINDS)[number]['k'];
   /** Same forms as `VolumeChange::parse` in masterhub-core. */
   const VOLUME = /^\s*([+-]\s*\d+|\d{1,2}|100|\{value\})\s*$/;
@@ -33,6 +36,7 @@
     if ('page' in a) return a.page === 'next' ? 'next' : a.page === 'prev' ? 'prev' : 'page';
     if ('folder' in a) return 'folder';
     if ('back' in a) return 'back';
+    if ('session' in a) return 'session';
     return 'profile';
   }
   function argOf(a: Action | undefined): string {
@@ -44,6 +48,7 @@
     if ('page' in a) return a.page === 'next' || a.page === 'prev' ? '' : a.page;
     if ('folder' in a) return a.folder;
     if ('profile' in a) return a.profile;
+    if ('session' in a) return String(a.session);
     return '';
   }
 
@@ -73,6 +78,7 @@
       case 'folder': return arg ? { folder: arg } : undefined;
       case 'back': return { back: true };
       case 'profile': return arg ? { profile: arg } : undefined;
+      case 'session': return { session: Number(arg) || 0 };
       default: return undefined;
     }
   }
@@ -82,6 +88,7 @@
     if (k === 'page' || k === 'folder' || k === 'profile') arg = names[0] ?? '';
     else if (k === 'volume') arg = '+2';
     else if (k === 'mute') arg = 'toggle';
+    else if (k === 'session') arg = '0';
     else if (k !== 'cmd' && k !== 'keys') arg = '';
     onchange(build());
   }
@@ -130,6 +137,11 @@
           <option value="on">Mute</option>
           <option value="off">Unmute</option>
         </select>
+      {:else if kind === 'session'}
+        <select class="select" value={arg} onchange={(e) => { arg = e.currentTarget.value; onchange(build()); }}>
+          {#each SLOTS as n}<option value={String(n)}>Session {n + 1}</option>{/each}
+        </select>
+        <p class="hint">Brings up that Claude Code session: its window, or the session in the Claude app. Sessions are numbered oldest first.</p>
       {:else if kind === 'page' || kind === 'folder' || kind === 'profile'}
         <select class="select" value={arg} onchange={(e) => { arg = e.currentTarget.value; onchange(build()); }}>
           {#each names as n}<option value={n}>{n}</option>{/each}

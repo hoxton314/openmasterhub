@@ -10,7 +10,8 @@ export type Action =
   | { back: boolean }
   | { profile: string }
   | { volume: string } // "+2", "-2", "40" or "{value}"
-  | { mute: Mute };
+  | { mute: Mute }
+  | { session: number }; // slot of a Claude Code session
 
 export type Mute = 'toggle' | 'on' | 'off';
 
@@ -22,7 +23,8 @@ export type Widget =
   | { kind: 'gpu_usage' }
   | { kind: 'gpu_temp' }
   | { kind: 'volume' }
-  | { kind: 'now_playing' };
+  | { kind: 'now_playing' }
+  | { kind: 'claude_session'; slot?: number };
 
 export interface Face {
   label?: string;
