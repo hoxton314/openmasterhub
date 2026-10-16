@@ -205,7 +205,7 @@ widget = { kind = "cpu_usage" }
 
 # ──────────── Claude profile: a key per open Claude Code session (docs/CLAUDE_CODE.md) ────────────
 # Active while the Claude desktop app is focused, or from the pinned Claude key on every page.
-# Each key shows a session's name and the mascot in its status colour ([status] above);
+# Each key shows a session's name and the mascot on a background in its status colour ([status] above);
 # pressing it brings that session up: in the Claude app, or the terminal window it runs in.
 [[profile]]
 name = "Claude"

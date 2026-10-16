@@ -55,14 +55,14 @@ when the service is not running.
 ## Session keys
 
 A `claude_session` widget shows one open session: its name (the title in the Claude app's
-sidebar, or set with `/rename`; otherwise the folder name) under a small mascot whose pose and
-colour follow the session's status:
+sidebar, or set with `/rename`; otherwise the folder name) under a small terracotta mascot. The
+key's background is tinted with the session's status colour and the mascot's pose follows it:
 
-| Status | Mascot |
+| Status | Key |
 | --- | --- |
-| working | `working` colour, typing (animated) |
-| ready | `ready` colour, standing |
-| attention | `attention` colour, waving; the key flashes with the Base |
+| working | `working` background, mascot typing (animated) |
+| ready | `ready` background, mascot standing |
+| attention | `attention` background flashing with the Base, mascot waving |
 
 Sessions fill the slots oldest first, so keys don't move around as sessions come and go; an
 empty slot shows the key as configured (blank, unless you gave it a label). The `session` action
@@ -100,7 +100,7 @@ files Claude Code keeps in `~/.claude/sessions/` (`$CLAUDE_CONFIG_DIR/sessions/`
 
 ## Colours
 
-The same colours are used on the Base and for the mascot on session keys.
+The same colours are used on the Base and for the background of session keys.
 
 ```toml
 [status]

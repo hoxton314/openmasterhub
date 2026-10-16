@@ -92,7 +92,7 @@
         {#each SLOTS as n}<option value={String(n)}>Session {n + 1}</option>{/each}
       </select>
     </div>
-    <p class="hint">Shows that Claude Code session (oldest first): its name, and the mascot in the colour of its status. Pair it with the Claude action to bring the session up.</p>
+    <p class="hint">Shows that Claude Code session (oldest first): its name and the mascot, on a background in the colour of its status. Pair it with the Claude action to bring the session up.</p>
   {/if}
 </div>
 

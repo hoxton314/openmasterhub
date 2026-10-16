@@ -93,8 +93,8 @@ listed app is focused.
 
 The Base light flashes when one of your Claude Code sessions needs an answer, turns green when
 a session is ready for a new prompt and blue while they work. The Claude profile gives every
-open session (in the Claude app or a terminal) its own key, with its name and a mascot in the
-colour of its status; press it to jump to that session. Setup: [`docs/CLAUDE_CODE.md`](docs/CLAUDE_CODE.md).
+open session (in the Claude app or a terminal) its own key, with its name and a mascot on a
+background in the colour of its status; press it to jump to that session. Setup: [`docs/CLAUDE_CODE.md`](docs/CLAUDE_CODE.md).
 
 ## Install
 

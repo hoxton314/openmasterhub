@@ -28,8 +28,9 @@ pub enum LiveData {
     Text { text: String, caption: Option<String> },
     /// Now playing.
     Media { title: String, artist: String, art: Option<RgbaImage> },
-    /// A Claude Code session: the mascot in the pose and colour of its status, and its name.
-    /// `frame` advances the working animation and flashes the attention pose (odd = dark).
+    /// A Claude Code session: its name and the mascot in the pose of its status, on a
+    /// background tinted with the status `color`. `frame` advances the working animation and
+    /// flashes the attention background (odd = dim).
     Session { name: String, status: Status, color: Color, frame: u32 },
 }
 
@@ -120,13 +121,14 @@ impl Renderer {
                 self.text(&mut img, artist, s * 0.87, s * 0.11, s * 0.9, dim(fg));
             }
             Some(LiveData::Session { name, status, color, frame }) => {
-                let flash_off = *status == Status::Attention && frame % 2 == 1;
-                if *status == Status::Attention && !flash_off {
-                    let glow = mix(bg, *color, 0.3);
-                    img = RgbImage::from_pixel(size, size, Rgb([glow.r, glow.g, glow.b]));
-                }
-                let body = if flash_off { dim(*color) } else { *color };
-                draw_mascot(&mut img, mascot(*status, *frame), body, s * 0.05, s * 0.6);
+                let tint = match status {
+                    Status::Attention if frame % 2 == 1 => 0.2,
+                    Status::Attention => 0.5,
+                    _ => 0.4,
+                };
+                let back = mix(bg, *color, tint);
+                img = RgbImage::from_pixel(size, size, Rgb([back.r, back.g, back.b]));
+                draw_mascot(&mut img, mascot(*status, *frame), s * 0.05, s * 0.6);
                 self.two_lines(&mut img, name, s * 0.83, s * 0.15, s * 0.92, fg);
             }
             None => {
@@ -329,23 +331,28 @@ fn mascot(status: Status, frame: u32) -> &'static [&'static str; 11] {
     }
 }
 
-/// Draw a sprite centred horizontally, `top` from the top edge and at most `height` tall;
-/// eyes are left in the background colour.
-fn draw_mascot(img: &mut RgbImage, sprite: &[&str; 11], body: Color, top: f32, height: f32) {
+/// Claude's terracotta, the mascot's own colour.
+const MASCOT_BODY: Color = Color::new(0xd9, 0x77, 0x57);
+const MASCOT_EYES: Color = Color::new(0x14, 0x14, 0x14);
+
+/// Draw a sprite centred horizontally, `top` from the top edge and at most `height` tall.
+fn draw_mascot(img: &mut RgbImage, sprite: &[&str; 11], top: f32, height: f32) {
     let size = img.width();
     let cell = ((height / sprite.len() as f32) as u32).max(1);
     let w = sprite[0].len() as u32 * cell;
     let (x0, y0) = ((size.saturating_sub(w)) / 2, top as u32);
     for (row, line) in sprite.iter().enumerate() {
         for (col, ch) in line.chars().enumerate() {
-            if ch != '#' {
-                continue;
-            }
+            let c = match ch {
+                '#' => MASCOT_BODY,
+                'o' => MASCOT_EYES,
+                _ => continue,
+            };
             for dy in 0..cell {
                 for dx in 0..cell {
                     let (x, y) = (x0 + col as u32 * cell + dx, y0 + row as u32 * cell + dy);
                     if x < size && y < img.height() {
-                        img.put_pixel(x, y, Rgb([body.r, body.g, body.b]));
+                        img.put_pixel(x, y, Rgb([c.r, c.g, c.b]));
                     }
                 }
             }
@@ -482,13 +489,16 @@ mod tests {
     }
 
     #[test]
-    fn mascot_takes_status_colour() {
+    fn session_background_takes_status_colour() {
         let r = Renderer { font: None };
-        let color = Color::new(0, 255, 64);
+        let color = Color::new(0, 200, 100);
         for status in [Status::Working, Status::Ready, Status::Attention] {
             let live = LiveData::Session { name: "x".into(), status, color, frame: 0 };
             let img = r.render_rgb(&Face::default(), KEY_SIZE, None, Some(&live));
-            assert!(img.pixels().filter(|p| p.0 == [0, 255, 64]).count() > 300, "{status:?}");
+            let back = mix(Color::new(0, 0, 0), color, if status == Status::Attention { 0.5 } else { 0.4 });
+            assert_eq!(img.get_pixel(0, KEY_SIZE - 1).0, [back.r, back.g, back.b], "{status:?}");
+            let body = MASCOT_BODY;
+            assert!(img.pixels().filter(|p| p.0 == [body.r, body.g, body.b]).count() > 300, "{status:?}");
         }
     }
 }
