@@ -102,6 +102,11 @@ export interface Profile {
 
 export type Orientation = 'auto' | 'portrait' | 'landscape' | 'portrait_flipped' | 'landscape_flipped';
 
+/** A key shown on every page of every profile except those in `except`. */
+export interface PinnedKey extends KeyConfig {
+  except?: string[];
+}
+
 export interface Config {
   font?: string;
   backlight: number;
@@ -109,6 +114,7 @@ export interface Config {
   status?: StatusLeds;
   orientation?: Orientation;
   upright?: boolean;
+  pinned?: PinnedKey[];
   profile?: Profile[];
 }
 

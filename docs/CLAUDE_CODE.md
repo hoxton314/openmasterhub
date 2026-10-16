@@ -82,8 +82,17 @@ press = { session = 0 }
 ```
 
 `examples/config.toml` has a ready-made **Claude** profile: thirteen session keys, *New*
-(`claude://code/new`) and *Back*. It activates while the Claude app is focused, and the Default
-profile has a *Claude* key that switches to it from anywhere. In the app, pick the **Claude**
+(`claude://code/new`) and *Back*, which returns to the profile of the app you are in. It
+activates while the Claude app is focused, and a pinned *Claude* key on every page of every
+profile switches to it from anywhere:
+
+```toml
+[[pinned]]
+index = 9
+label = "Claude"
+press = { profile = "Claude" }
+except = ["Claude"]   # the Claude profile shows its own key there
+``` In the app, pick the **Claude**
 widget and the **Claude** action and choose the same session number.
 
 Session keys use the same hooks as the Base LED (set up above), and the names come from the

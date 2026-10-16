@@ -28,6 +28,10 @@ pub struct Config {
     /// Base and the modules are rotated.
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub upright: bool,
+    /// Keys shown at the same place on every keypad page and folder of every profile, over
+    /// the page's own key there, e.g. a key that opens the Claude profile from anywhere.
+    #[serde(default, rename = "pinned", skip_serializing_if = "Vec::is_empty")]
+    pub pinned: Vec<PinnedKey>,
     /// The first profile is the default; it is used when no other profile matches the
     /// focused application.
     #[serde(default, rename = "profile", skip_serializing_if = "Vec::is_empty")]
@@ -43,6 +47,7 @@ impl Default for Config {
             status: StatusLeds::default(),
             orientation: Orientation::Auto,
             upright: true,
+            pinned: Vec::new(),
             profiles: Vec::new(),
         }
     }
@@ -308,6 +313,27 @@ impl KeyConfig {
     }
 }
 
+/// A key on every page (`Config::pinned`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PinnedKey {
+    #[serde(flatten)]
+    pub key: KeyConfig,
+    /// Profiles that show their own key there instead.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except: Vec<String>,
+}
+
+impl Config {
+    /// The key at `index` on a page of `profile`: a pinned key, else the page's own.
+    pub fn key<'a>(&'a self, profile: &str, page: &'a Page, index: u8) -> Option<&'a KeyConfig> {
+        self.pinned
+            .iter()
+            .find(|p| p.key.index == index && !p.except.iter().any(|e| e == profile))
+            .map(|p| &p.key)
+            .or_else(|| page.key(index))
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DialConfig {
@@ -481,6 +507,11 @@ impl Config {
                 }
             }
         }
+        for p in &mut cfg.pinned {
+            if let Some(img) = &mut p.key.face.image {
+                *img = expand(base_dir, img);
+            }
+        }
         if let Some(font) = &mut cfg.font {
             *font = expand(base_dir, font);
         }
@@ -549,7 +580,25 @@ impl Config {
                 }
             }
         }
-        for action in self.profiles.iter().flat_map(Profile::actions) {
+        let mut pinned = std::collections::HashSet::new();
+        for p in &self.pinned {
+            if p.key.index > 14 {
+                bail!("pinned key index {} out of range 0..=14", p.key.index);
+            }
+            if !pinned.insert(p.key.index) {
+                bail!("pinned key {} configured twice", p.key.index);
+            }
+            if let Some(e) = p.except.iter().find(|e| !self.profiles.iter().any(|x| &x.name == *e)) {
+                bail!("pinned key {}: profile {e:?} does not exist", p.key.index);
+            }
+            for action in [&p.key.press, &p.key.release].into_iter().flatten() {
+                if matches!(action, Action::Folder(_) | Action::Page(_)) {
+                    bail!("pinned key {}: folder and page actions differ per profile; use profile, back or session", p.key.index);
+                }
+            }
+        }
+        let pinned_actions = self.pinned.iter().flat_map(|p| [&p.key.press, &p.key.release]).flatten();
+        for action in self.profiles.iter().flat_map(Profile::actions).chain(pinned_actions) {
             if let Action::Profile(name) = action
                 && !self.profiles.iter().any(|p| &p.name == name)
             {
@@ -649,6 +698,11 @@ mod tests {
         let again = Config::parse(&cfg.to_toml().unwrap(), Path::new("/x")).unwrap();
         assert_eq!(cfg, again);
         let claude = cfg.profiles.iter().find(|p| p.name == "Claude").unwrap();
+        let pin = &cfg.pinned[0];
+        assert_eq!(pin.key.press, Some(Action::Profile("Claude".into())));
+        let main = &cfg.profiles[0].pages[0];
+        assert_eq!(cfg.key("Default", main, pin.key.index), Some(&pin.key));
+        assert_ne!(cfg.key("Claude", &claude.pages[0], pin.key.index), Some(&pin.key));
         let key = claude.pages[0].key(2).unwrap();
         assert_eq!(key.face.widget, Some(Widget::ClaudeSession { slot: 2 }));
         assert_eq!(key.press, Some(Action::Session(2)));
@@ -690,6 +744,12 @@ mod tests {
         assert!(Config::parse(bad_index, Path::new("/")).is_err());
         let bad_volume = "[[profile]]\nname='A'\n[profile.dial]\ncw={volume='up'}\n";
         assert!(Config::parse(bad_volume, Path::new("/")).is_err());
+        let pin = |extra: &str| format!("[[pinned]]\nindex=4\n{extra}\n[[profile]]\nname='A'\n");
+        assert!(Config::parse(&pin("press={profile='A'}\nexcept=['A']"), Path::new("/")).is_ok());
+        assert!(Config::parse(&pin("except=['Nope']"), Path::new("/")).is_err());
+        assert!(Config::parse(&pin("press={folder='F'}"), Path::new("/")).is_err());
+        assert!(Config::parse(&pin("press={profile='Nope'}"), Path::new("/")).is_err());
+        assert!(Config::parse(&pin("labl='typo'"), Path::new("/")).is_err());
     }
 
     #[test]

@@ -322,6 +322,11 @@ impl Controller {
         }
     }
 
+    /// The key at `index` on screen: pinned, or the page's own.
+    fn key_ref(&self, index: u8) -> Option<&masterhub_core::config::KeyConfig> {
+        self.config.key(self.profile_name()?, self.page_ref()?, index)
+    }
+
     fn switch_profile(&mut self, index: usize) {
         if index >= self.config.profiles.len() {
             return;
@@ -369,6 +374,15 @@ impl Controller {
                 self.folders.clear();
             }
             Action::Folder(name) => self.folders.push(name.clone()),
+            // Out of a folder, or out of a profile switched to by hand (a pinned Claude key)
+            // back to the one for the focused app.
+            Action::Back(_) if self.folders.is_empty() => {
+                let target = self.config.profile_for_app(self.active_app.as_deref().unwrap_or_default());
+                if target != self.profile {
+                    self.switch_profile(target);
+                }
+                return true;
+            }
             Action::Back(_) => {
                 self.folders.pop();
             }
@@ -606,7 +620,7 @@ impl Controller {
         if target == TARGET_DIAL {
             self.profile_ref()?.dial.as_ref().map(|d| d.face.clone())
         } else {
-            self.page_ref()?.key(target).map(|k| k.face.clone())
+            self.key_ref(target).map(|k| k.face.clone())
         }
     }
 
@@ -816,7 +830,7 @@ impl Controller {
         };
         match control {
             "key" => {
-                let k = self.page_ref()?.key(index)?;
+                let k = self.key_ref(index)?;
                 if event == "down" { k.press.clone() } else { k.release.clone() }
             }
             "fader" => p.faders.iter().find(|f| f.index == index)?.change.clone(),
