@@ -19,6 +19,7 @@ use masterhub_proto::{
 };
 
 use crate::actions::Request;
+use crate::claude::SessionFile;
 use crate::ipc::Broadcaster;
 use crate::hid::ModuleInfo;
 use crate::stats::Stats;
@@ -66,6 +67,19 @@ struct Anim {
     due: Instant,
 }
 
+/// A tool that reports its status, such as a Claude Code session (`claude:<session id>`).
+struct Reporter {
+    status: Status,
+    pid: Option<u32>,
+    /// When it first reported, in `Controller::reports`.
+    first: u64,
+    /// What Claude Code wrote about the session, re-read every tick (the name changes).
+    file: Option<SessionFile>,
+    /// Found in the session files rather than reported by a hook; its status follows the file
+    /// until the first hook event.
+    discovered: bool,
+}
+
 pub struct Controller {
     config: Config,
     config_path: PathBuf,
@@ -74,6 +88,8 @@ pub struct Controller {
     pictures: HashMap<(PathBuf, u32), Option<Rc<Picture>>>,
     modules: BTreeMap<String, Module>,
     profile: usize,
+    /// The profile shown before the current one, for `back` outside a folder.
+    previous_profile: Option<usize>,
     page: usize,
     folders: Vec<String>,
     /// Last orientation reported by the Base's sensor, if any.
@@ -86,7 +102,11 @@ pub struct Controller {
     snapshot: Arc<Mutex<Snapshot>>,
     events: Arc<Broadcaster>,
     /// Tool status per source, with the process that reported it.
-    statuses: HashMap<String, (Status, Option<u32>)>,
+    statuses: HashMap<String, Reporter>,
+    /// Counts status reports, to order sessions that started at the same time.
+    reports: u64,
+    /// Advances every tick; animates working sessions.
+    ticks: u32,
     /// Status on the Base LED, whether a flash is lit and when it toggles next.
     shown_status: Option<Status>,
     blink_on: bool,
@@ -120,6 +140,7 @@ impl Controller {
             pictures: HashMap::new(),
             modules: BTreeMap::new(),
             profile: 0,
+            previous_profile: None,
             page: 0,
             folders: Vec::new(),
             sensor_horizontal: None,
@@ -131,6 +152,8 @@ impl Controller {
             snapshot,
             events,
             statuses: HashMap::new(),
+            reports: 0,
+            ticks: 0,
             shown_status: None,
             blink_on: true,
             blink_due: None,
@@ -153,6 +176,7 @@ impl Controller {
             let now = Instant::now();
             if now >= next_tick {
                 next_tick = now + TICK;
+                self.ticks = self.ticks.wrapping_add(1);
                 self.check_config_file();
                 self.prune_statuses();
                 self.sample_widgets();
@@ -217,10 +241,18 @@ impl Controller {
             Msg::SetStatus { source, status, pid } => {
                 log::debug!("status {source}: {status:?}");
                 match status {
-                    Some(st) => self.statuses.insert(source, (st, pid)),
-                    None => self.statuses.remove(&source),
-                };
+                    Some(status) => {
+                        let file = pid.filter(|_| source.starts_with("claude:")).and_then(SessionFile::of);
+                        let first = self.statuses.get(&source).map(|r| r.first).unwrap_or(self.reports);
+                        self.reports += 1;
+                        self.statuses.insert(source, Reporter { status, pid, first, file, discovered: false });
+                    }
+                    None => {
+                        self.statuses.remove(&source);
+                    }
+                }
                 self.update_status();
+                self.refresh_sessions();
             }
         }
     }
@@ -257,6 +289,7 @@ impl Controller {
         self.anims.clear();
         // Keep the user where they were if that still exists.
         self.profile = old_profile.and_then(|n| self.config.profiles.iter().position(|p| p.name == n)).unwrap_or(0);
+        self.previous_profile = None;
         let pages = self.profile_ref().map(|p| p.pages.as_slice()).unwrap_or_default();
         self.page = old_page.and_then(|n| pages.iter().position(|p| p.name == n)).unwrap_or(0);
         let folders = self.profile_ref().map(|p| p.folders.clone()).unwrap_or_default();
@@ -293,9 +326,17 @@ impl Controller {
         }
     }
 
+    /// The key at `index` on screen: pinned, or the page's own.
+    fn key_ref(&self, index: u8) -> Option<&masterhub_core::config::KeyConfig> {
+        self.config.key(self.profile_name()?, self.page_ref()?, index)
+    }
+
     fn switch_profile(&mut self, index: usize) {
         if index >= self.config.profiles.len() {
             return;
+        }
+        if index != self.profile {
+            self.previous_profile = Some(self.profile);
         }
         self.profile = index;
         self.page = 0;
@@ -340,6 +381,16 @@ impl Controller {
                 self.folders.clear();
             }
             Action::Folder(name) => self.folders.push(name.clone()),
+            // Outside a folder: back to the profile shown before this one (the app's profile
+            // after a pinned Claude key, or the one before the Claude app was focused), else
+            // the profile of the focused app, else the default.
+            Action::Back(_) if self.folders.is_empty() => {
+                let app = self.config.profile_for_app(self.active_app.as_deref().unwrap_or_default());
+                if let Some(t) = back_target(self.profile, self.previous_profile, app, self.config.profiles.len()) {
+                    self.switch_profile(t);
+                }
+                return true;
+            }
             Action::Back(_) => {
                 self.folders.pop();
             }
@@ -349,7 +400,7 @@ impl Controller {
                 }
                 return true;
             }
-            Action::Cmd(_) | Action::Keys(_) | Action::Volume(_) | Action::Mute(_) => return false,
+            Action::Cmd(_) | Action::Keys(_) | Action::Volume(_) | Action::Mute(_) | Action::Session(_) => return false,
         }
         self.anims.clear();
         self.refresh_all();
@@ -419,16 +470,20 @@ impl Controller {
         })
     }
 
-    /// Show the most urgent status of all sources on the Base.
+    /// Show the most urgent status of all sources on the Base, and flash while any source
+    /// needs attention (the Base and session keys flash together).
     fn update_status(&mut self) {
-        let top = if self.config.status.enabled { self.statuses.values().map(|(s, _)| *s).max() } else { None };
+        let attention = self.statuses.values().any(|r| r.status == Status::Attention);
+        if attention != self.blink_due.is_some() {
+            self.blink_on = true;
+            self.blink_due = attention.then(|| Instant::now() + BLINK);
+        }
+        let top = if self.config.status.enabled { self.statuses.values().map(|r| r.status).max() } else { None };
         if top == self.shown_status {
             return;
         }
         log::info!("base status: {top:?}");
         self.shown_status = top;
-        self.blink_on = true;
-        self.blink_due = (top == Some(Status::Attention)).then(|| Instant::now() + BLINK);
         let Some(serial) = self.base_serial() else { return };
         if top.is_none() && self.effective_leds().base.is_none() {
             // No Base colour configured: back to the firmware's colour cycling.
@@ -445,25 +500,104 @@ impl Controller {
         let Some(due) = self.blink_due.filter(|d| *d <= now) else { return };
         self.blink_on = !self.blink_on;
         self.blink_due = Some((due + BLINK).max(now));
-        if let (Some(c), Some(m)) = (self.status_color(), self.base_serial().and_then(|s| self.modules.get(&s))) {
+        if self.shown_status == Some(Status::Attention)
+            && let (Some(c), Some(m)) = (self.status_color(), self.base_serial().and_then(|s| self.modules.get(&s)))
+        {
             let reports = led_color(ModuleKind::Base, LedTarget::Index(0), c.0).into_iter().collect();
             let _ = m.tx.send(DeviceCmd::Output(reports));
         }
+        self.refresh_sessions();
     }
 
-    /// Forget sources whose process has exited without clearing its status.
+    /// Forget sources whose process has exited without clearing its status, and re-read the
+    /// session files of the others.
     fn prune_statuses(&mut self) {
         let before = self.statuses.len();
-        self.statuses.retain(|source, (_, pid)| {
-            let alive = pid.is_none_or(process_alive);
+        self.statuses.retain(|source, r| {
+            let alive = r.pid.is_none_or(process_alive);
             if !alive {
                 log::info!("status {source}: process gone");
             }
             alive
         });
-        if self.statuses.len() != before {
+        for (source, r) in &mut self.statuses {
+            if let Some(pid) = r.pid.filter(|_| source.starts_with("claude:") && !r.discovered) {
+                r.file = SessionFile::of(pid);
+            }
+        }
+        let mut changed = self.statuses.len() != before;
+        for (pid, file) in SessionFile::running() {
+            let source = format!("claude:{}", file.session_id.as_deref().unwrap_or_default());
+            match self.statuses.get_mut(&source) {
+                Some(r) if !r.discovered => {}
+                Some(r) => {
+                    changed |= r.status != file.status();
+                    r.status = file.status();
+                    r.file = Some(file);
+                }
+                None => {
+                    log::info!("found Claude Code session {source} (pid {pid})");
+                    let r = Reporter { status: file.status(), pid: Some(pid), first: self.reports, file: Some(file), discovered: true };
+                    self.reports += 1;
+                    self.statuses.insert(source, r);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
             self.update_status();
         }
+    }
+
+    // ───────────────────────────── Claude Code sessions ─────────────────────────────
+
+    /// Open Claude Code sessions in slot order: oldest first, so keys don't move around.
+    fn sessions(&self) -> Vec<&Reporter> {
+        let mut v: Vec<&Reporter> =
+            self.statuses.iter().filter(|(source, _)| source.starts_with("claude:")).map(|(_, r)| r).collect();
+        v.sort_by_key(|r| (r.file.as_ref().and_then(|f| f.started_at).unwrap_or(u64::MAX), r.first));
+        v
+    }
+
+    /// What a session key shows; `None` for an empty slot.
+    fn session_live(&self, slot: u8) -> Option<LiveData> {
+        let r = *self.sessions().get(slot as usize)?;
+        let c = &self.config.status;
+        let (color, frame) = match r.status {
+            Status::Attention => (c.attention, u32::from(!self.blink_on)),
+            Status::Ready => (c.ready, 0),
+            Status::Working => (c.working, self.ticks),
+        };
+        let name = r.file.as_ref().and_then(SessionFile::title).unwrap_or_else(|| "Claude".to_owned());
+        Some(LiveData::Session { name, status: r.status, color: color.0, frame })
+    }
+
+    /// Redraw session keys after a status change or a flash, if any are on screen.
+    fn refresh_sessions(&mut self) {
+        let slots: Vec<Widget> =
+            self.visible_widgets().into_iter().filter(|w| matches!(w, Widget::ClaudeSession { .. })).collect();
+        if slots.is_empty() {
+            return;
+        }
+        for w in slots {
+            self.set_session_live(w);
+        }
+        self.refresh_all();
+    }
+
+    fn set_session_live(&mut self, w: Widget) {
+        let Widget::ClaudeSession { slot } = w else { return };
+        match self.session_live(slot) {
+            Some(live) => self.live.insert(w, live),
+            None => self.live.remove(&w),
+        };
+    }
+
+    /// Bring up the session in `slot`, off the controller thread.
+    fn bring_up(&self, slot: u8) {
+        let Some(r) = self.sessions().get(slot as usize).copied() else { return };
+        let (pid, file) = (r.pid, r.file.clone());
+        std::thread::spawn(move || crate::claude::bring_up(pid, file.as_ref()));
     }
 
     fn base_serial(&self) -> Option<String> {
@@ -494,7 +628,7 @@ impl Controller {
         if target == TARGET_DIAL {
             self.profile_ref()?.dial.as_ref().map(|d| d.face.clone())
         } else {
-            self.page_ref()?.key(target).map(|k| k.face.clone())
+            self.key_ref(target).map(|k| k.face.clone())
         }
     }
 
@@ -590,6 +724,15 @@ impl Controller {
 
     /// Sample live data for widgets visible on connected displays.
     fn sample_widgets(&mut self) {
+        let needed = self.visible_widgets();
+        self.live = self.stats.sample(&needed);
+        for w in needed {
+            self.set_session_live(w);
+        }
+    }
+
+    /// Widgets on the connected displays right now.
+    fn visible_widgets(&self) -> Vec<Widget> {
         let mut needed = Vec::new();
         for m in self.modules.values() {
             let targets: Vec<u8> = match m.info.kind {
@@ -603,7 +746,7 @@ impl Controller {
                 }
             }
         }
-        self.live = self.stats.sample(&needed);
+        needed
     }
 
     // ───────────────────────────── input ─────────────────────────────
@@ -669,6 +812,10 @@ impl Controller {
             };
             self.events.send(Event::Input(msg));
             if let Some(action) = self.binding(control, index, event) {
+                if let Action::Session(slot) = action {
+                    self.bring_up(slot);
+                    continue;
+                }
                 let coalesce = (control == "fader").then(|| format!("{serial}/fader{index}"));
                 if !self.navigate(&action) {
                     let _ = self.actions.send(Request { action, value, coalesce });
@@ -691,7 +838,7 @@ impl Controller {
         };
         match control {
             "key" => {
-                let k = self.page_ref()?.key(index)?;
+                let k = self.key_ref(index)?;
                 if event == "down" { k.press.clone() } else { k.release.clone() }
             }
             "fader" => p.faders.iter().find(|f| f.index == index)?.change.clone(),
@@ -773,12 +920,12 @@ impl Controller {
 }
 
 #[cfg(target_os = "linux")]
-fn process_alive(pid: u32) -> bool {
+pub fn process_alive(pid: u32) -> bool {
     std::path::Path::new(&format!("/proc/{pid}")).exists()
 }
 
 #[cfg(windows)]
-fn process_alive(pid: u32) -> bool {
+pub fn process_alive(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
     use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
     // SAFETY: plain Win32 calls; the handle is closed before returning.
@@ -795,10 +942,34 @@ fn process_alive(pid: u32) -> bool {
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-fn process_alive(_pid: u32) -> bool {
+pub fn process_alive(_pid: u32) -> bool {
     true
+}
+
+/// Where `back` outside a folder goes from profile `current`: the previous profile, else the
+/// focused app's, else the default; never the current one.
+fn back_target(current: usize, previous: Option<usize>, app: usize, profiles: usize) -> Option<usize> {
+    [previous, Some(app), Some(0)].into_iter().flatten().find(|&i| i != current && i < profiles)
 }
 
 fn mtime(path: &std::path::Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn back_leaves_the_profile() {
+        // Pinned Claude key pressed in Ghostty (1): back to Ghostty.
+        assert_eq!(back_target(5, Some(1), 1, 6), Some(1));
+        // Claude app focused (its profile 5 came from focus), Discord (2) before it.
+        assert_eq!(back_target(5, Some(2), 5, 6), Some(2));
+        // Nothing before: the default profile.
+        assert_eq!(back_target(5, None, 5, 6), Some(0));
+        // A previous profile that no longer exists is skipped.
+        assert_eq!(back_target(5, Some(9), 5, 6), Some(0));
+        assert_eq!(back_target(0, None, 0, 1), None);
+    }
 }

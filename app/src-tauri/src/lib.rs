@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use base64::Engine;
-use masterhub_core::config::{Config, Face, Widget};
-use masterhub_core::ipc::{Client, ClientEvent, DisplayImage, Event, HubState, ModuleState};
+use masterhub_core::config::{self, Config, Face, Widget};
+use masterhub_core::ipc::{Client, ClientEvent, DisplayImage, Event, HubState, ModuleState, Status};
 use masterhub_core::render::{KEY_SIZE, LiveData, Picture, Renderer, load_picture};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -100,6 +100,12 @@ fn preview_face(state: State<AppState>, face: Face) -> Result<String, String> {
     let live = face.widget.as_ref().map(|w| match w {
         Widget::Clock { .. } => LiveData::Text { text: "12:34".into(), caption: Some("Mon 12".into()) },
         Widget::NowPlaying => LiveData::Media { title: "Song title".into(), artist: "Artist".into(), art: None },
+        Widget::ClaudeSession { slot } => LiveData::Session {
+            name: format!("Session {}", slot + 1),
+            status: Status::Ready,
+            color: config::StatusLeds::default().ready.0,
+            frame: 0,
+        },
         other => LiveData::Gauge { fraction: 0.42, text: "42%".into(), caption: other.title().split(' ').next().unwrap_or("").to_owned() },
     });
     let jpeg = state.renderer.render(&face, KEY_SIZE, frame, live.as_ref(), 0).map_err(err)?;

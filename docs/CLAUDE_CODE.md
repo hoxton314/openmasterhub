@@ -1,7 +1,8 @@
-# Claude Code status on the Base LED
+# Claude Code status on the Base LED and keys
 
 `masterhubd` can show what your [Claude Code](https://claude.com/claude-code) sessions are doing
-on the Base LED. With several sessions open, the most urgent one wins:
+on the Base LED, and give every open session its own key (see [Session keys](#session-keys)).
+On the Base, with several sessions open, the most urgent one wins:
 
 | Status | Default | When |
 | --- | --- | --- |
@@ -51,14 +52,62 @@ even if it never sent `SessionEnd`.
 The hook prints nothing and always exits successfully, so it never blocks Claude Code, even
 when the service is not running.
 
+## Session keys
+
+A `claude_session` widget shows one open session: its name (the title in the Claude app's
+sidebar, or set with `/rename`; otherwise the folder name) under a small terracotta mascot. The
+key's background is tinted with the session's status colour and the mascot's pose follows it:
+
+| Status | Key |
+| --- | --- |
+| working | `working` background, mascot typing (animated) |
+| ready | `ready` background, mascot standing |
+| attention | `attention` background flashing with the Base, mascot waving |
+
+Sessions fill the slots oldest first, so keys don't move around as sessions come and go; an
+empty slot shows the key as configured (blank, unless you gave it a label). The `session` action
+brings a session up:
+
+- **Claude desktop app** sessions open in the app (`claude://code/continue?session=local_…`)
+  and its window comes to the front.
+- **Terminal** sessions focus the window of the terminal `claude` runs in (Hyprland on Linux,
+  the foreground window on Windows). With several tabs, or tmux, in one terminal window, that
+  window comes up but not the tab.
+
+```toml
+[[profile.page.key]]
+index = 0
+widget = { kind = "claude_session", slot = 0 }
+press = { session = 0 }
+```
+
+`examples/config.toml` has a ready-made **Claude** profile: thirteen session keys, *New*
+(`claude://code/new`) and *Back*, which returns to the profile shown before. It
+activates while the Claude app is focused, and a pinned *Claude* key on every page of every
+profile switches to it from anywhere:
+
+```toml
+[[pinned]]
+index = 9
+label = "Claude"
+press = { profile = "Claude" }
+except = ["Claude"]   # the Claude profile shows its own key there
+``` In the app, pick the **Claude**
+widget and the **Claude** action and choose the same session number.
+
+Session keys use the same hooks as the Base LED (set up above), and the names come from the
+files Claude Code keeps in `~/.claude/sessions/` (`$CLAUDE_CONFIG_DIR/sessions/`).
+
 ## Colours
+
+The same colours are used on the Base and for the background of session keys.
 
 ```toml
 [status]
 attention = "#ff4000"
 ready = "#00ff40"
 working = "#0060ff"
-# enabled = false   # ignore status reports and keep the normal Base colour
+# enabled = false   # keep the normal Base colour (session keys still work)
 ```
 
 ## How it works

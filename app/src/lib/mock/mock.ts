@@ -23,7 +23,8 @@ function preview(face: Face): string {
   g.font = '600 34px Inter Variable, sans-serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText(face.label ?? (face.widget ? '42%' : ''), 72, 72, 130);
+  const live = face.widget?.kind === 'claude_session' ? `Session ${(face.widget.slot ?? 0) + 1}` : face.widget ? '42%' : '';
+  g.fillText(face.label ?? live, 72, 72, 130);
   return c.toDataURL();
 }
 
