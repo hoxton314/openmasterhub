@@ -12,12 +12,16 @@
 #   { mute = "toggle" }             mute the default output: toggle, on, off
 #   { page = "next" | "prev" | "<page name>" }
 #   { folder = "<folder name>" }    open a keypad folder
-#   { back = true }                 leave the folder
+#   { back = true }                 leave the folder (outside a folder: back to the profile
+#                                   shown before)
 #   { profile = "<profile name>" }  switch profile
+#   { session = 0 }                 bring up a Claude Code session by slot (see the widget)
 #
 # Widgets (key or dial face): { kind = "clock", format = "%H:%M" }, cpu_usage, cpu_temp,
-#   ram_usage, gpu_usage, gpu_temp, volume, now_playing. On Windows, cpu_temp (and the GPU
-#   widgets without an NVIDIA driver) read LibreHardwareMonitor while it runs.
+#   ram_usage, gpu_usage, gpu_temp, volume, now_playing, and { kind = "claude_session", slot = 0 }
+#   (an open Claude Code session, oldest first: its name and status; see docs/CLAUDE_CODE.md).
+#   On Windows, cpu_temp (and the GPU widgets without an NVIDIA driver) read
+#   LibreHardwareMonitor while it runs.
 # Images: PNG/JPEG, or GIF (animated).
 #
 # The first profile is the default. Other profiles activate when the focused window's class
@@ -38,6 +42,15 @@ brightness = 100
 attention = "#ff4000"   # a session waits for your answer: flashes
 ready = "#00ff40"       # finished, waiting for a new prompt
 working = "#0060ff"
+
+# Pinned keys show on every page and folder of every profile, over the page's own key there
+# (not in the profiles listed in `except`).
+[[pinned]]
+index = 9
+label = "Claude"
+background = "#c15f3c"
+press = { profile = "Claude" }
+except = ["Claude"]
 
 # ─────────────────────────────── Default profile ───────────────────────────────
 [[profile]]
@@ -189,3 +202,91 @@ widget = { kind = "cpu_temp" }
 
 [profile.dial]
 widget = { kind = "cpu_usage" }
+
+# ──────────── Claude profile: a key per open Claude Code session (docs/CLAUDE_CODE.md) ────────────
+# Active while the Claude desktop app is focused, or from the pinned Claude key on every page.
+# Each key shows a session's name and the mascot on a background in its status colour ([status] above);
+# pressing it brings that session up: in the Claude app, or the terminal window it runs in.
+[[profile]]
+name = "Claude"
+apps = ["com.anthropic.Claude", "claude.exe"]
+
+[[profile.page]]
+name = "Sessions"
+
+[[profile.page.key]]
+index = 0
+widget = { kind = "claude_session", slot = 0 }
+press = { session = 0 }
+
+[[profile.page.key]]
+index = 1
+widget = { kind = "claude_session", slot = 1 }
+press = { session = 1 }
+
+[[profile.page.key]]
+index = 2
+widget = { kind = "claude_session", slot = 2 }
+press = { session = 2 }
+
+[[profile.page.key]]
+index = 3
+widget = { kind = "claude_session", slot = 3 }
+press = { session = 3 }
+
+[[profile.page.key]]
+index = 4
+widget = { kind = "claude_session", slot = 4 }
+press = { session = 4 }
+
+[[profile.page.key]]
+index = 5
+widget = { kind = "claude_session", slot = 5 }
+press = { session = 5 }
+
+[[profile.page.key]]
+index = 6
+widget = { kind = "claude_session", slot = 6 }
+press = { session = 6 }
+
+[[profile.page.key]]
+index = 7
+widget = { kind = "claude_session", slot = 7 }
+press = { session = 7 }
+
+[[profile.page.key]]
+index = 8
+widget = { kind = "claude_session", slot = 8 }
+press = { session = 8 }
+
+[[profile.page.key]]
+index = 9
+widget = { kind = "claude_session", slot = 9 }
+press = { session = 9 }
+
+[[profile.page.key]]
+index = 10
+widget = { kind = "claude_session", slot = 10 }
+press = { session = 10 }
+
+[[profile.page.key]]
+index = 11
+widget = { kind = "claude_session", slot = 11 }
+press = { session = 11 }
+
+[[profile.page.key]]
+index = 12
+widget = { kind = "claude_session", slot = 12 }
+press = { session = 12 }
+
+[[profile.page.key]]
+index = 13
+label = "New"
+background = "#c15f3c"
+press = { cmd = "xdg-open claude://code/new" }   # Windows: start claude://code/new
+
+[[profile.page.key]]
+index = 14
+label = "Back"
+background = "#3a3a46"
+press = { back = true }   # back to the profile shown before

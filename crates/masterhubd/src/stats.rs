@@ -104,6 +104,8 @@ impl Stats {
                 gauge(if muted { 0.0 } else { v }, text, "Volume")
             }
             Widget::NowPlaying => self.now_playing()?,
+            // The controller fills these in from its session list.
+            Widget::ClaudeSession { .. } => return None,
         })
     }
 
