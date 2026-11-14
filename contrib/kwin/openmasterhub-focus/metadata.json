@@ -1,0 +1,13 @@
+{
+    "KPlugin": {
+        "Id": "openmasterhub-focus",
+        "Name": "OpenMasterHUB focus reporter",
+        "Description": "Reports the focused window class to masterhubd for per-app profiles",
+        "Version": "0.1",
+        "License": "MIT",
+        "Authors": [{ "Name": "JandreParis" }]
+    },
+    "KPackageStructure": "KWin/Script",
+    "X-Plasma-API": "javascript",
+    "X-Plasma-MainScript": "code/main.js"
+}
