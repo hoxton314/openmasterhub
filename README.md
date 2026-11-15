@@ -68,7 +68,6 @@ listed app is focused.
 
 On KDE Plasma (6, Wayland or X11) `masterhubd` loads a small KWin script by itself, so there is
 nothing to install; the class is the window's `resourceClass` (`org.kde.konsole`, `firefox`).
-The list of open windows is Hyprland-only for now, so on KDE type the class.
 
 <table>
   <tr>

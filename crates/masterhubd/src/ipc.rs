@@ -150,5 +150,6 @@ fn handle(request: Request, controller: &Sender<Msg>, snapshot: &Mutex<Snapshot>
             controller.send(Msg::SetStatus { source, status, pid })?;
             json(())
         }
+        Request::GetOpenApps => json(crate::focus::open_apps()?),
     }
 }

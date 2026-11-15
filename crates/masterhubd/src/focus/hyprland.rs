@@ -98,6 +98,13 @@ fn active_class(dir: &std::path::Path) -> Option<String> {
     v.get("class")?.as_str().map(str::to_owned)
 }
 
+/// Classes of all open windows (`j/clients`).
+pub fn window_classes() -> Result<Vec<String>> {
+    let dir = instance_dir().context("Hyprland is not running")?;
+    let clients: Vec<serde_json::Value> = serde_json::from_str(&request(&dir, "j/clients")?)?;
+    Ok(clients.iter().filter_map(|c| c.get("class")?.as_str().map(str::to_owned)).collect())
+}
+
 /// Focus the window of `pid`, or of its nearest ancestor that has one (the terminal a CLI
 /// runs in), switching workspace if needed. When that process has several windows, prefer the
 /// one whose title contains `title`, else the one focused last.

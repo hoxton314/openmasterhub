@@ -3,7 +3,8 @@
 //! Wayland apps cannot see other windows, but KWin can. masterhubd loads a small KWin script
 //! over D-Bus (`org.kde.kwin.Scripting`) that calls `ActiveWindow(class)` on this service on
 //! every focus change. It is loaded again whenever KWin or masterhubd restarts, so nothing has to
-//! be installed. `raise` runs a one-shot script the same way.
+//! be installed. `raise` and `window_classes` run one-shot scripts the same way, which answer
+//! over D-Bus.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -24,9 +25,16 @@ const KWIN: &str = "org.kde.KWin";
 const FOCUS_PLUGIN: &str = "openmasterhub-focus";
 const FOCUS_JS: &str = include_str!("kwin/focus.js");
 const RAISE_JS: &str = include_str!("kwin/raise.js");
+const WINDOWS_JS: &str = include_str!("kwin/windows.js");
 
-/// Raise requests waiting for their script's answer, by token.
-type Pending = Arc<Mutex<HashMap<String, Sender<bool>>>>;
+/// What a one-shot script answers.
+enum Reply {
+    Raised(bool),
+    Windows(Vec<String>),
+}
+
+/// One-shot scripts waiting for their answer, by token.
+type Pending = Arc<Mutex<HashMap<String, Sender<Reply>>>>;
 
 struct Service {
     conn: Connection,
@@ -50,8 +58,19 @@ impl Focus {
 
     /// Called by a raise script when it is done.
     fn raised(&self, token: &str, found: bool) {
+        self.reply(token, Reply::Raised(found));
+    }
+
+    /// Called by the window list script: the classes of the open windows, one per line.
+    fn windows(&self, token: &str, classes: &str) {
+        self.reply(token, Reply::Windows(classes.lines().map(str::to_owned).collect()));
+    }
+}
+
+impl Focus {
+    fn reply(&self, token: &str, reply: Reply) {
         if let Some(tx) = self.pending.lock().unwrap().remove(token) {
-            let _ = tx.send(found);
+            let _ = tx.send(reply);
         }
     }
 }
@@ -140,23 +159,37 @@ fn write_script(name: &str, text: &str) -> PathBuf {
 /// desktop if needed. When that process has several windows, prefer the one whose title
 /// contains `title`, else the topmost.
 pub fn raise(pid: u32, title: Option<&str>) -> Result<()> {
+    let pids = pids(pid);
+    match one_shot("raise", |token| raise_script(&pids, token, title))? {
+        Reply::Raised(true) => Ok(()),
+        _ => bail!("no window found for process {pid} or its parents"),
+    }
+}
+
+/// Classes of the open windows.
+pub fn window_classes() -> Result<Vec<String>> {
+    match one_shot("windows", |token| WINDOWS_JS.replace("__TOKEN__", &serde_json::Value::from(token).to_string()))? {
+        Reply::Windows(classes) => Ok(classes),
+        Reply::Raised(_) => bail!("unexpected answer from KWin"),
+    }
+}
+
+/// Run a script made by `script(token)` once and wait for the answer it sends with `token`.
+fn one_shot(kind: &str, script: impl FnOnce(&str) -> String) -> Result<Reply> {
     let svc = SERVICE.get().context("the KDE focus service is not running")?;
     kwin_owner(&svc.conn).context("neither Hyprland nor KWin is running")?;
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let token = format!("{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
-    let plugin = format!("openmasterhub-raise-{token}");
-    let path = write_script(&format!("raise-{token}.js"), &raise_script(&pids(pid), &token, title));
+    let plugin = format!("openmasterhub-{kind}-{token}");
+    let path = write_script(&format!("{kind}-{token}.js"), &script(&token));
 
     let (tx, rx) = mpsc::channel();
     svc.pending.lock().unwrap().insert(token.clone(), tx);
-    let found = run_script(&svc.conn, &path, &plugin).and_then(|()| rx.recv_timeout(Duration::from_secs(2)).context("KWin did not answer"));
+    let reply = run_script(&svc.conn, &path, &plugin).and_then(|()| rx.recv_timeout(Duration::from_secs(2)).context("KWin did not answer"));
     svc.pending.lock().unwrap().remove(&token);
     let _ = scripting(&svc.conn, "unloadScript", &(plugin.as_str(),));
     let _ = std::fs::remove_file(&path);
-    if !found? {
-        bail!("no window found for process {pid} or its parents");
-    }
-    Ok(())
+    reply
 }
 
 /// `pid` and up to 15 of its ancestors.
@@ -199,3 +232,4 @@ mod tests {
         assert_eq!(p.get(1).copied(), Some(std::os::unix::process::parent_id()).filter(|&p| p > 1));
     }
 }
+
