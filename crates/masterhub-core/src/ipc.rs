@@ -20,6 +20,7 @@
 //! | `get_audio` | | [`AudioInfo`]: apps playing audio, output and input devices |
 //! | `claim` | `name`, `controls`, `apps`, `priority` | take over controls (live surface), `{"claim": id}` |
 //! | `release` | `claim` | give them back |
+//! | `run_action` | `action` (as in the config, e.g. `{"keys":"ctrl+c"}`), `value`? | run it now |
 //! | `frame` | `claim`, `target`, `jpeg` (base64) | show an image on a claimed key (0..=14) or the dial (255) |
 //! | `led` | `claim`, `zone`, `mode`, `color`, `brightness` | set a claimed LED |
 //!
@@ -209,6 +210,12 @@ pub enum Request {
         priority: i32,
     },
     Release { claim: u64 },
+    /// Run a config action now, as if a control bound to it fired (`value`: a fader position).
+    RunAction {
+        action: crate::config::Action,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<u8>,
+    },
     /// A 72×72 (key) or 240×240 (dial) JPEG, base64, for a claimed key or the dial (255).
     Frame { claim: u64, target: u8, jpeg: String },
     /// Set a claimed LED. Fields left out keep their value.
@@ -438,6 +445,16 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn run_action_takes_config_actions() {
+        let r: RequestMsg = serde_json::from_str(r#"{"id":3,"method":"run_action","params":{"action":{"volume":"+2","app":"focused"}}}"#).unwrap();
+        let Request::RunAction { action, value } = r.request else { panic!("not run_action") };
+        assert_eq!(value, None);
+        assert!(matches!(action, crate::config::Action::AppVolume { .. }));
+        let r: RequestMsg = serde_json::from_str(r#"{"id":4,"method":"run_action","params":{"action":{"keys":"ctrl+c"}}}"#).unwrap();
+        assert!(matches!(r.request, Request::RunAction { action: crate::config::Action::Keys(_), .. }));
+    }
+
     use super::*;
 
     #[test]

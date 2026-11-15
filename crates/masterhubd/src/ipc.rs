@@ -187,6 +187,10 @@ fn handle(
             controller.send(Msg::Claim { claim, name, controls, apps, priority })?;
             json(serde_json::json!({ "claim": claim }))
         }
+        Request::RunAction { action, value } => {
+            controller.send(Msg::RunAction { action, value })?;
+            json(())
+        }
         Request::Release { claim } => {
             own(claim)?;
             claims.retain(|c| *c != claim);

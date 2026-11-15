@@ -42,3 +42,15 @@ config keeps working under it; when the claim ends, the config's faces and actio
 Measured on hardware (2026-11-15): one client streaming 5 keys plus the dial reached
 53 rounds per second. The keypad takes about 600 key images per second in total, the dial
 about 68 frames per second.
+
+## Running actions
+
+`run_action` runs any config action now, as if a control bound to it fired. A client that owns
+a key uses it to get the service's key presses, volume, per-app volume, commands, page and
+profile switches and Claude session jumps, without implementing them itself:
+
+```json
+{"id":6,"method":"run_action","params":{"action":{"keys":"ctrl+shift+t"}}}
+{"id":7,"method":"run_action","params":{"action":{"volume":"+2","app":"focused"}}}
+{"id":8,"method":"run_action","params":{"action":{"session":0}}}
+```

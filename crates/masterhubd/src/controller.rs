@@ -45,6 +45,8 @@ pub enum Msg {
     /// Live surface (see [`crate::surface`]).
     Claim { claim: u64, name: String, controls: Controls, apps: Vec<String>, priority: i32 },
     Release { claim: u64 },
+    /// An action from a client (`run_action`).
+    RunAction { action: Action, value: Option<u8> },
     Frame { claim: u64, target: u8, jpeg: Arc<Vec<u8>> },
     Led { claim: u64, zone: LedZone, mode: Option<LedMode>, color: Option<Rgb>, brightness: Option<u8> },
 }
@@ -324,6 +326,13 @@ impl Controller {
                 if self.claims.remove(claim) {
                     log::info!("claim #{claim} released");
                     self.reclaim();
+                }
+            }
+            Msg::RunAction { action, value } => {
+                if let Action::Session(slot) = action {
+                    self.bring_up(slot);
+                } else if !self.navigate(&action) {
+                    let _ = self.actions.send(Request { action, value, coalesce: None });
                 }
             }
             Msg::Frame { claim, target, jpeg } => {
