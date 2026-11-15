@@ -21,11 +21,41 @@ struct HookInput {
     notification_type: Option<String>,
     /// Set for events from a subagent.
     agent_id: Option<String>,
+    /// Sent with `Stop`: the session's tasks still running in the background.
+    background_tasks: Option<Vec<BackgroundTask>>,
 }
 
-/// What the session's status becomes after this event: `Some(None)` clears it, `None` keeps it.
-fn status_for(input: &HookInput) -> Option<Option<Status>> {
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct BackgroundTask {
+    /// `subagent`, `workflow`, `teammate`, `shell`, `monitor`, ...
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+impl HookInput {
+    /// Whether the main agent will be woken again: a background subagent, workflow or teammate
+    /// is still running. Shells and monitors are left out, as they may run for good (a dev
+    /// server) without the session doing anything.
+    fn agents_running(&self) -> bool {
+        self.background_tasks.iter().flatten().any(|t| matches!(t.kind.as_str(), "subagent" | "workflow" | "teammate"))
+    }
+}
+
+/// What a hook event reports.
+#[derive(Debug, PartialEq)]
+struct Report {
+    /// `None` clears the session.
+    status: Option<Status>,
+    /// From a subagent: turns `ready` into `working` but never hides `attention`.
+    background: bool,
+}
+
+/// What the session's status becomes after this event, `None` to keep it.
+fn report_for(input: &HookInput) -> Option<Report> {
     let s = match input.hook_event_name.as_str() {
+        // The turn ended, but background agents will wake the main agent when they finish.
+        "Stop" if input.agents_running() => Status::Working,
         // StopFailure: the turn ended on an API error, without a Stop.
         "SessionStart" | "Stop" | "StopFailure" => Status::Ready,
         "UserPromptSubmit" | "ElicitationResult" => Status::Working,
@@ -33,18 +63,21 @@ fn status_for(input: &HookInput) -> Option<Option<Status>> {
         "PreToolUse" if matches!(input.tool_name.as_deref(), Some("AskUserQuestion" | "ExitPlanMode")) => {
             Status::Attention
         }
-        // Subagents keep running while the main session waits on a prompt; don't let their
-        // tool calls hide it.
         "PreToolUse" | "PostToolUse" | "PostToolUseFailure" if input.agent_id.is_none() => Status::Working,
+        // A subagent at work. Subagents keep running while the main session waits on a prompt,
+        // so this must not hide it; but it does mean the session is not ready yet.
+        "PreToolUse" | "PostToolUse" | "PostToolUseFailure" | "SubagentStart" => {
+            return Some(Report { status: Some(Status::Working), background: true });
+        }
         "Notification" => match input.notification_type.as_deref() {
             Some("permission_prompt" | "elicitation_dialog") => Status::Attention,
             Some("idle_prompt") => Status::Ready,
             _ => return None,
         },
-        "SessionEnd" => return Some(None),
+        "SessionEnd" => return Some(Report { status: None, background: false }),
         _ => return None,
     };
-    Some(Some(s))
+    Some(Report { status: Some(s), background: false })
 }
 
 pub fn hook() {
@@ -53,8 +86,9 @@ pub fn hook() {
         return;
     }
     let Ok(input) = serde_json::from_str::<HookInput>(&text) else { return };
-    let Some(status) = status_for(&input) else { return };
-    let request = Request::SetStatus { source: format!("claude:{}", input.session_id), status, pid: claude_pid() };
+    let Some(Report { status, background }) = report_for(&input) else { return };
+    let request =
+        Request::SetStatus { source: format!("claude:{}", input.session_id), status, pid: claude_pid(), background };
     // The service may not be running; that's fine.
     let _ = call_once(request);
 }
@@ -270,8 +304,13 @@ mod tests {
         assert_eq!(odd.desktop_link(), None);
     }
 
+    /// The status a hook event sets, `Some(None)` when it clears it; `None` for background ones.
     fn status(json: &str) -> Option<Option<Status>> {
-        status_for(&serde_json::from_str(json).unwrap())
+        report(json).filter(|r| !r.background).map(|r| r.status)
+    }
+
+    fn report(json: &str) -> Option<Report> {
+        report_for(&serde_json::from_str(json).unwrap())
     }
 
     #[cfg(target_os = "linux")]
@@ -300,6 +339,29 @@ mod tests {
         );
         assert_eq!(status(r#"{"session_id":"a","hook_event_name":"PostToolUse","tool_name":"Bash"}"#), Some(Some(Status::Working)));
         assert_eq!(status(r#"{"session_id":"a","hook_event_name":"PostToolUse","tool_name":"Bash","agent_id":"x"}"#), None);
+        assert_eq!(status(r#"{"session_id":"a","hook_event_name":"SubagentStop","agent_id":"x"}"#), None);
         assert_eq!(status(r#"{"session_id":"a","hook_event_name":"SessionEnd","reason":"exit"}"#), Some(None));
+    }
+
+    #[test]
+    fn background_agents_keep_the_session_working() {
+        // The turn ends while a background subagent or workflow runs: it will wake the session.
+        let stop = |tasks: &str| {
+            status(&format!(r#"{{"session_id":"a","hook_event_name":"Stop","stop_hook_active":false,"background_tasks":{tasks}}}"#))
+        };
+        assert_eq!(stop(r#"[{"id":"t1","type":"subagent","status":"running","description":"Review","agent_type":"Explore"}]"#), Some(Some(Status::Working)));
+        assert_eq!(stop(r#"[{"id":"t2","type":"workflow","status":"pending","description":"Fan out","name":"review"}]"#), Some(Some(Status::Working)));
+        // A dev server or monitor in the background is not work the session waits on.
+        assert_eq!(stop(r#"[{"id":"t3","type":"shell","status":"running","description":"npm run dev","command":"npm run dev"}]"#), Some(Some(Status::Ready)));
+        assert_eq!(stop(r#"[{"id":"t4","type":"monitor","status":"running","description":"CI"}]"#), Some(Some(Status::Ready)));
+        assert_eq!(stop("[]"), Some(Some(Status::Ready)));
+        assert_eq!(stop("null"), Some(Some(Status::Ready)));
+        // Older Claude Code versions send no list.
+        assert_eq!(status(r#"{"session_id":"a","hook_event_name":"Stop"}"#), Some(Some(Status::Ready)));
+
+        // Subagent activity reports background work, which never hides a waiting prompt.
+        let busy = Some(Report { status: Some(Status::Working), background: true });
+        assert_eq!(report(r#"{"session_id":"a","hook_event_name":"PreToolUse","tool_name":"Bash","agent_id":"x"}"#), busy);
+        assert_eq!(report(r#"{"session_id":"a","hook_event_name":"SubagentStart","agent_id":"x","agent_type":"Explore"}"#), busy);
     }
 }

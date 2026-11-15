@@ -15,7 +15,7 @@
 //! | `get_displays` | | `Vec<DisplayImage>` |
 //! | `set_profile` | `name` | switch profile (until the focused app changes) |
 //! | `show_page` | `name` | show a keypad page or folder of the active profile |
-//! | `set_status` | `source`, `status`, `pid` | set (or clear, `status: null`) a tool's [`Status`] |
+//! | `set_status` | `source`, `status`, `pid`, `background` | set (or clear, `status: null`) a tool's [`Status`] |
 //!
 //! Events: `input`, `state`, `modules`, `display`, `config_changed`.
 
@@ -119,6 +119,10 @@ pub enum Request {
         status: Option<Status>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pid: Option<u32>,
+        /// Reported for work running in the background of the source (a Claude Code subagent):
+        /// a `working` report then turns `ready` into `working` but never hides `attention`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        background: bool,
     },
 }
 
@@ -329,7 +333,7 @@ mod tests {
 
         let r = RequestMsg {
             id: 2,
-            request: Request::SetStatus { source: "claude:x".into(), status: Some(Status::Attention), pid: None },
+            request: Request::SetStatus { source: "claude:x".into(), status: Some(Status::Attention), pid: None, background: false },
         };
         assert_eq!(
             serde_json::to_string(&r).unwrap(),
