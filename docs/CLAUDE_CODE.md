@@ -8,7 +8,7 @@ On the Base, with several sessions open, the most urgent one wins:
 | --- | --- | --- |
 | attention | `#ff4000`, **flashing** | a session waits for you: permission prompt, question, plan approval |
 | ready | `#00ff40` | a session finished its turn and waits for a new prompt |
-| working | `#0060ff` | every session is busy |
+| working | `#0060ff` | every session is busy, or waits for its background agents |
 | (none) | your `[leds] base` colour | no Claude Code session is open |
 
 Works on Linux and Windows. The service forgets a session whose `claude` process has exited,
@@ -118,14 +118,22 @@ status and sends `set_status` over the service's local socket (`docs/app-archite
 | Hook event | Status |
 | --- | --- |
 | `SessionStart`, `Stop`, `StopFailure` (turn ended on an API error) | ready |
+| `Stop` while a background subagent, workflow or teammate still runs | working |
 | `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `ElicitationResult` | working |
 | `PreToolUse` of `AskUserQuestion` or `ExitPlanMode`, `PermissionRequest`, `Elicitation` (MCP server asks for input) | attention |
 | `Notification`: `permission_prompt`, `elicitation_dialog` | attention |
 | `Notification`: `idle_prompt` | ready |
 | `SessionEnd` | cleared |
 
-Tool events from subagents are ignored, so a background agent does not stop the flash while
-the main session waits for you.
+A turn can end while subagents or workflows keep running in the background; they wake the
+session again when they finish, so it stays **working** until then (`Stop` lists them in
+`background_tasks`). Background shells and monitors don't count: a dev server may run for good
+without the session doing anything.
+
+Tool events from subagents (and `SubagentStart`, if you add that hook) turn a ready session back
+to working, but never stop the flash while the main session waits for you. If a session's
+process has been idle with nothing reported for 15 minutes while it shows working (background
+agents stopped by hand, a lost hook event), it falls back to ready.
 
 Other tools can use the same request, one JSON line on the socket:
 
@@ -133,3 +141,6 @@ Other tools can use the same request, one JSON line on the socket:
 {"id":1,"method":"set_status","params":{"source":"my-tool","status":"attention"}}
 {"id":2,"method":"set_status","params":{"source":"my-tool","status":null}}
 ```
+
+`"background": true` marks a `working` report as coming from work in the background of the
+source: it then never replaces `attention`.

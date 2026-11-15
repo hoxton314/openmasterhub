@@ -34,8 +34,9 @@ pub enum Msg {
     ApplyConfig { config: Box<Config>, text: String },
     SetProfile(String),
     ShowPage(String),
-    /// A tool's status for the Base LED; `None` forgets the source.
-    SetStatus { source: String, status: Option<Status>, pid: Option<u32> },
+    /// A tool's status for the Base LED; `None` forgets the source. `background`: from work in
+    /// the background of the source (see [`reported_status`]).
+    SetStatus { source: String, status: Option<Status>, pid: Option<u32>, background: bool },
 }
 
 /// State shared with the IPC server.
@@ -78,6 +79,8 @@ struct Reporter {
     /// Found in the session files rather than reported by a hook; its status follows the file
     /// until the first hook event.
     discovered: bool,
+    /// When it last reported.
+    reported: Instant,
 }
 
 pub struct Controller {
@@ -114,6 +117,9 @@ pub struct Controller {
 }
 
 const TICK: Duration = Duration::from_secs(1);
+/// How long a Claude Code session stays `working` while its process is idle and nothing reports:
+/// background agents report their tool calls, so a missed wake-up can't keep it blue forever.
+const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// Half period of the attention flash.
 const BLINK: Duration = Duration::from_millis(500);
 
@@ -238,14 +244,17 @@ impl Controller {
                 }
             }
             Msg::ShowPage(name) => self.show_page(&name),
-            Msg::SetStatus { source, status, pid } => {
-                log::debug!("status {source}: {status:?}");
+            Msg::SetStatus { source, status, pid, background } => {
+                log::debug!("status {source}: {status:?}{}", if background { " (background)" } else { "" });
                 match status {
                     Some(status) => {
                         let file = pid.filter(|_| source.starts_with("claude:")).and_then(SessionFile::of);
-                        let first = self.statuses.get(&source).map(|r| r.first).unwrap_or(self.reports);
+                        let old = self.statuses.get(&source);
+                        let first = old.map(|r| r.first).unwrap_or(self.reports);
+                        let status = reported_status(old.map(|r| r.status), status, background);
                         self.reports += 1;
-                        self.statuses.insert(source, Reporter { status, pid, first, file, discovered: false });
+                        let r = Reporter { status, pid, first, file, discovered: false, reported: Instant::now() };
+                        self.statuses.insert(source, r);
                     }
                     None => {
                         self.statuses.remove(&source);
@@ -520,12 +529,18 @@ impl Controller {
             }
             alive
         });
+        let mut changed = self.statuses.len() != before;
         for (source, r) in &mut self.statuses {
             if let Some(pid) = r.pid.filter(|_| source.starts_with("claude:") && !r.discovered) {
                 r.file = SessionFile::of(pid);
+                let idle = r.file.as_ref().is_some_and(|f| f.status.as_deref() == Some("idle"));
+                if waited_too_long(r.status, idle, r.reported.elapsed()) {
+                    log::info!("status {source}: idle and silent for {BACKGROUND_TIMEOUT:?}, ready");
+                    r.status = Status::Ready;
+                    changed = true;
+                }
             }
         }
-        let mut changed = self.statuses.len() != before;
         for (pid, file) in SessionFile::running() {
             let source = format!("claude:{}", file.session_id.as_deref().unwrap_or_default());
             match self.statuses.get_mut(&source) {
@@ -537,7 +552,14 @@ impl Controller {
                 }
                 None => {
                     log::info!("found Claude Code session {source} (pid {pid})");
-                    let r = Reporter { status: file.status(), pid: Some(pid), first: self.reports, file: Some(file), discovered: true };
+                    let r = Reporter {
+                        status: file.status(),
+                        pid: Some(pid),
+                        first: self.reports,
+                        file: Some(file),
+                        discovered: true,
+                        reported: Instant::now(),
+                    };
                     self.reports += 1;
                     self.statuses.insert(source, r);
                     changed = true;
@@ -956,9 +978,46 @@ fn mtime(path: &std::path::Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
+/// The status a report leaves: one from background work (a subagent's tool call) says the
+/// source is not done yet, so it turns `ready` into `working`, but never hides `attention`.
+fn reported_status(old: Option<Status>, new: Status, background: bool) -> Status {
+    match old {
+        Some(Status::Attention) if background => Status::Attention,
+        _ => new,
+    }
+}
+
+/// Whether a `working` session has waited too long on background work: its process is idle
+/// and nothing has reported since. Catches a wake-up that never came (agents stopped by hand,
+/// a lost hook event).
+fn waited_too_long(status: Status, idle: bool, silent: Duration) -> bool {
+    status == Status::Working && idle && silent >= BACKGROUND_TIMEOUT
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn background_reports_never_hide_attention() {
+        use Status::*;
+        assert_eq!(reported_status(Some(Ready), Working, true), Working);
+        assert_eq!(reported_status(None, Working, true), Working);
+        assert_eq!(reported_status(Some(Attention), Working, true), Attention);
+        assert_eq!(reported_status(Some(Attention), Working, false), Working);
+        assert_eq!(reported_status(Some(Working), Ready, false), Ready);
+    }
+
+    #[test]
+    fn stuck_background_work_times_out() {
+        let long = BACKGROUND_TIMEOUT + Duration::from_secs(1);
+        assert!(waited_too_long(Status::Working, true, long));
+        assert!(!waited_too_long(Status::Working, true, Duration::from_secs(60)));
+        // Busy in a long tool call of its own.
+        assert!(!waited_too_long(Status::Working, false, long));
+        assert!(!waited_too_long(Status::Attention, true, long));
+        assert!(!waited_too_long(Status::Ready, true, long));
+    }
 
     #[test]
     fn back_leaves_the_profile() {
