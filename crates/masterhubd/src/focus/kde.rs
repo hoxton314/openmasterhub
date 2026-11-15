@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
@@ -22,7 +22,10 @@ use crate::controller::Msg;
 const BUS_NAME: &str = "org.openmasterhub.Focus";
 const OBJECT_PATH: &str = "/org/openmasterhub/Focus";
 const KWIN: &str = "org.kde.KWin";
-const FOCUS_PLUGIN: &str = "openmasterhub-focus";
+/// Not `openmasterhub-focus`: that was the id of a KWin package installed by hand in an early
+/// version, and `Scripting.start()` unloads a loaded script named like a disabled package.
+const FOCUS_PLUGIN: &str = "openmasterhubd-focus";
+const LEGACY_FOCUS_PLUGIN: &str = "openmasterhub-focus";
 const FOCUS_JS: &str = include_str!("kwin/focus.js");
 const RAISE_JS: &str = include_str!("kwin/raise.js");
 const WINDOWS_JS: &str = include_str!("kwin/windows.js");
@@ -43,6 +46,9 @@ struct Service {
 
 static SERVICE: OnceLock<Service> = OnceLock::new();
 
+/// Set when the focus script reports, to tell that it really runs.
+static REPORTED: AtomicBool = AtomicBool::new(false);
+
 struct Focus {
     controller: Sender<Msg>,
     pending: Pending,
@@ -53,6 +59,9 @@ impl Focus {
     /// Called by the focus script. An empty class means no window is focused.
     fn active_window(&self, class: &str) {
         log::debug!("kde focus: {class:?}");
+        if !REPORTED.swap(true, Ordering::Relaxed) {
+            log::info!("following focused window via KWin");
+        }
         let _ = self.controller.send(Msg::ActiveApp(class.to_owned()));
     }
 
@@ -104,14 +113,28 @@ fn follow_kwin(conn: &Connection) -> ! {
     loop {
         let owner = kwin_owner(conn);
         if owner.is_some() && owner != seen {
-            match run_script(conn, &write_script("focus.js", FOCUS_JS), FOCUS_PLUGIN) {
-                Ok(()) => log::info!("following focused window via KWin"),
-                Err(e) => log::warn!("loading the KWin focus script: {e:#}"),
-            }
+            load_focus_script(conn);
         }
         seen = owner;
         thread::sleep(Duration::from_secs(3));
     }
+}
+
+/// Load the focus script, then check that it reports: it does once as soon as it runs.
+fn load_focus_script(conn: &Connection) {
+    // An earlier masterhubd of this branch loaded it under the old name.
+    unload(conn, LEGACY_FOCUS_PLUGIN);
+    REPORTED.store(false, Ordering::Relaxed);
+    if let Err(e) = run_script(conn, &write_script("focus.js", FOCUS_JS), FOCUS_PLUGIN) {
+        return log::warn!("loading the KWin focus script: {e:#}");
+    }
+    for _ in 0..50 {
+        if REPORTED.load(Ordering::Relaxed) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    log::warn!("KWin loaded the focus script but it never reported; look for KWin scripting errors in `journalctl --user -b`");
 }
 
 /// The unique bus name of the running KWin.
@@ -127,22 +150,36 @@ fn scripting(conn: &Connection, method: &str, body: &(impl serde::Serialize + zb
 }
 
 /// Load `path` into KWin as `plugin` and start it, replacing a script of that name.
+///
+/// Scripts are started with `Scripting.start()`, which runs every loaded script that is not
+/// running yet (KWin calls it itself when its config changes), rather than through their
+/// `/Scripting/ScriptN` objects: KWin numbers a new script `scripts.size()`, so once a script
+/// in the middle of the list has been unloaded, a new one gets the number (and D-Bus path) of a
+/// script that is still running, and `run()` on that path does nothing.
 fn run_script(conn: &Connection, path: &std::path::Path, plugin: &str) -> Result<()> {
-    // One left by an earlier masterhubd still holds the name; KWin would refuse a second.
-    let _ = scripting(conn, "unloadScript", &(plugin,));
+    unload(conn, plugin);
     let path = path.to_str().context("script path is not UTF-8")?;
     let id: i32 = scripting(conn, "loadScript", &(path, plugin))?.body().deserialize()?;
     if id < 0 {
         bail!("KWin refused to load {path}");
     }
-    // Plasma 6 puts scripts under /Scripting/ScriptN, Plasma 5 under /N.
-    for object in [format!("/Scripting/Script{id}"), format!("/{id}")] {
-        if conn.call_method(Some(KWIN), object.as_str(), Some("org.kde.kwin.Script"), "run", &()).is_ok() {
-            return Ok(());
-        }
+    scripting(conn, "start", &())?;
+    Ok(())
+}
+
+/// Unload the script named `plugin`, if loaded, and wait until it is gone: KWin deletes it
+/// later, and refuses to load another script of that name until then.
+fn unload(conn: &Connection, plugin: &str) {
+    if !matches!(scripting(conn, "unloadScript", &(plugin,)).and_then(|r| r.body().deserialize::<bool>()), Ok(true)) {
+        return;
     }
-    let _ = scripting(conn, "unloadScript", &(plugin,));
-    bail!("could not start KWin script {id}")
+    for _ in 0..20 {
+        let loaded = scripting(conn, "isScriptLoaded", &(plugin,)).and_then(|r| r.body().deserialize::<bool>());
+        if !matches!(loaded, Ok(true)) {
+            return;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// KWin reads scripts from files: `$XDG_RUNTIME_DIR/openmasterhub/<name>`.
@@ -187,6 +224,7 @@ fn one_shot(kind: &str, script: impl FnOnce(&str) -> String) -> Result<Reply> {
     svc.pending.lock().unwrap().insert(token.clone(), tx);
     let reply = run_script(&svc.conn, &path, &plugin).and_then(|()| rx.recv_timeout(Duration::from_secs(2)).context("KWin did not answer"));
     svc.pending.lock().unwrap().remove(&token);
+    // A unique name: no need to wait until KWin has deleted it.
     let _ = scripting(&svc.conn, "unloadScript", &(plugin.as_str(),));
     let _ = std::fs::remove_file(&path);
     reply
@@ -232,4 +270,5 @@ mod tests {
         assert_eq!(p.get(1).copied(), Some(std::os::unix::process::parent_id()).filter(|&p| p > 1));
     }
 }
+
 
