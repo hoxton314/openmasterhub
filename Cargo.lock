@@ -2290,6 +2290,7 @@ name = "masterhubd"
 version = "0.8.0"
 dependencies = [
  "anyhow",
+ "base64 0.23.1",
  "ctrlc",
  "env_logger",
  "evdev",
