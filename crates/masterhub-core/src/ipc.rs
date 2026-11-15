@@ -21,6 +21,7 @@
 //! | `get_sessions` | | open Claude Code sessions, `Vec<SessionInfo>` (also the `sessions` event) |
 //! | `claim` | `name`, `controls`, `apps`, `priority` | take over controls (live surface), `{"claim": id}` |
 //! | `release` | `claim` | give them back |
+//! | `backlight` | `claim`, `level` (0..=100, null = the config's) | dim the key and dial screens while the claim lives |
 //! | `run_action` | `action` (as in the config, e.g. `{"keys":"ctrl+c"}`), `value`? | run it now |
 //! | `frame` | `claim`, `target`, `jpeg` (base64) | show an image on a claimed key (0..=14) or the dial (255) |
 //! | `led` | `claim`, `zone`, `mode`, `color`, `brightness` | set a claimed LED |
@@ -216,6 +217,9 @@ pub enum Request {
         priority: i32,
     },
     Release { claim: u64 },
+    /// Key and dial screen backlight, 0..=100, or `None` for the config's level. Ends with
+    /// the claim, so a client that quits never leaves the screens dark.
+    Backlight { claim: u64, level: Option<u8> },
     /// Run a config action now, as if a control bound to it fired (`value`: a fader position).
     RunAction {
         action: crate::config::Action,

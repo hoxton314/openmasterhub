@@ -192,6 +192,11 @@ fn handle(
             controller.send(Msg::RunAction { action, value })?;
             json(())
         }
+        Request::Backlight { claim, level } => {
+            own(claim)?;
+            controller.send(Msg::Backlight { claim, level })?;
+            json(())
+        }
         Request::Release { claim } => {
             own(claim)?;
             claims.retain(|c| *c != claim);

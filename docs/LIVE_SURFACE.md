@@ -54,3 +54,13 @@ profile switches and Claude session jumps, without implementing them itself:
 {"id":7,"method":"run_action","params":{"action":{"volume":{"level":"+2","app":"discord"}}}}
 {"id":8,"method":"run_action","params":{"action":{"session":0}}}
 ```
+
+## Backlight
+
+`backlight` dims the key and dial screens for as long as the claim lives: level 0..=100, or
+`null` for the config's level. When the claim ends, the config's level comes back, so a client
+that quits never leaves the screens dark.
+
+```json
+{"id":9,"method":"backlight","params":{"claim":7,"level":5}}
+```

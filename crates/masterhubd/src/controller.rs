@@ -51,6 +51,7 @@ pub enum Msg {
     /// Live surface (see [`crate::surface`]).
     Claim { claim: u64, name: String, controls: Controls, apps: Vec<String>, priority: i32 },
     Release { claim: u64 },
+    Backlight { claim: u64, level: Option<u8> },
     /// An action from a client (`run_action`).
     RunAction { action: Action, value: Option<u8> },
     Frame { claim: u64, target: u8, jpeg: Arc<Vec<u8>> },
@@ -158,6 +159,8 @@ pub struct Controller {
     /// [`DISPLAY_EVERY`]; the newest is sent on the next tick.
     display_sent: HashMap<(String, u8), Instant>,
     display_pending: BTreeMap<(String, u8), Arc<Vec<u8>>>,
+    /// A client's backlight level and its claim; the config's level otherwise.
+    backlight: Option<(u64, u8)>,
 }
 
 const DISPLAY_EVERY: Duration = Duration::from_millis(100);
@@ -221,6 +224,7 @@ impl Controller {
             claims: Claims::default(),
             display_sent: HashMap::new(),
             display_pending: BTreeMap::new(),
+            backlight: None,
         };
         c.publish_state();
         c
@@ -335,7 +339,15 @@ impl Controller {
                 self.reclaim();
                 self.publish_claim(claim);
             }
+            Msg::Backlight { claim, level } => {
+                self.backlight = level.map(|l| (claim, l.min(100)));
+                self.send_backlight();
+            }
             Msg::Release { claim } => {
+                if self.backlight.is_some_and(|(c, _)| c == claim) {
+                    self.backlight = None;
+                    self.send_backlight();
+                }
                 if self.claims.remove(claim) {
                     log::info!("claim #{claim} released");
                     self.reclaim();
@@ -367,6 +379,13 @@ impl Controller {
     }
 
     // ───────────────────────────── live surface ─────────────────────────────
+
+    fn send_backlight(&self) {
+        let level = self.backlight.map_or(self.config.backlight, |(_, l)| l);
+        for m in self.modules.values().filter(|m| matches!(m.info.kind, ModuleKind::Keypad | ModuleKind::Dial)) {
+            let _ = m.tx.send(DeviceCmd::Backlight(level));
+        }
+    }
 
     fn serials_of(&self, kind: ModuleKind) -> Vec<String> {
         self.modules.values().filter(|m| m.info.kind == kind).map(|m| m.info.serial.clone()).collect()
@@ -639,7 +658,7 @@ impl Controller {
         m.shown.clear();
         let kind = m.info.kind;
         if matches!(kind, ModuleKind::Keypad | ModuleKind::Dial) {
-            let _ = m.tx.send(DeviceCmd::Backlight(self.config.backlight));
+            let _ = m.tx.send(DeviceCmd::Backlight(self.backlight.map_or(self.config.backlight, |(_, l)| l)));
         }
         self.send_leds(serial);
         self.refresh_module(serial);
