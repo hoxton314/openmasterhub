@@ -28,7 +28,7 @@ pub fn spawn(controller: Sender<Msg>) {
                         }
                     }
                     None if !warned => {
-                        log::info!("Hyprland not detected; per-app profiles disabled until it appears");
+                        log::info!("Hyprland not detected; watching for it");
                         warned = true;
                     }
                     None => {}
@@ -37,6 +37,11 @@ pub fn spawn(controller: Sender<Msg>) {
             }
         })
         .expect("spawn hyprland thread");
+}
+
+/// Whether a Hyprland instance is running.
+pub fn running() -> bool {
+    instance_dir().is_some()
 }
 
 /// `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE`, or the newest instance directory
@@ -113,7 +118,7 @@ pub fn raise(pid: u32, title: Option<&str>) -> Result<()> {
             }
             return Ok(());
         }
-        p = match parent_pid(p) {
+        p = match super::parent_pid(p) {
             Some(pp) if pp > 1 => pp,
             _ => break,
         };
@@ -140,12 +145,6 @@ fn pick_window<'a>(clients: &'a [Client], pid: u32, title: Option<&str>) -> Opti
     title.and_then(|t| own.iter().find(|c| c.title.to_lowercase().contains(&t)).copied()).or(own.first().copied())
 }
 
-fn parent_pid(pid: u32) -> Option<u32> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // "pid (comm) state ppid ...", where comm may itself contain parentheses.
-    stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,10 +165,5 @@ mod tests {
         assert_eq!(pick_window(&clients, 1, Some("nothing")).unwrap().address, "b");
         assert_eq!(pick_window(&clients, 1, None).unwrap().address, "b");
         assert!(pick_window(&clients, 3, None).is_none());
-    }
-
-    #[test]
-    fn finds_parent_process() {
-        assert_eq!(parent_pid(std::process::id()), Some(std::os::unix::process::parent_id()));
     }
 }
