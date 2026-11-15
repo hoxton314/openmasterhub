@@ -111,6 +111,19 @@ impl Worker {
                     cmds.retain(|c| !matches!(c, DeviceCmd::Image { target: t, .. } if *t == target));
                     cmds.push(DeviceCmd::Image { target, jpeg });
                 }
+                // LED reports: a newer one for the same command and LED replaces the older,
+                // so a fast stream of LED changes can't back up behind the 4 ms pacing.
+                Ok(DeviceCmd::Output(reports)) => {
+                    for r in reports {
+                        let key = |x: &[u8]| (x.get(1).copied(), x.get(2).copied(), x.get(3).copied());
+                        for c in cmds.iter_mut() {
+                            if let DeviceCmd::Output(old) = c {
+                                old.retain(|o| key(o) != key(&r));
+                            }
+                        }
+                        cmds.push(DeviceCmd::Output(vec![r]));
+                    }
+                }
                 Ok(cmd) => cmds.push(cmd),
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
             }

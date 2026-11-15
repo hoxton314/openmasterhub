@@ -352,7 +352,8 @@ impl Controller {
                 st.color = color.or(st.color);
                 st.brightness = brightness.or(st.brightness);
                 if self.claims.owner(Control::Led(zone)) == Some(claim) {
-                    self.send_zone_leds(zone);
+                    // Only this LED, only what changed: LED reports are slow (one per 4 ms).
+                    self.send_one_led(zone, mode, color, brightness);
                 }
             }
         }
@@ -437,6 +438,25 @@ impl Controller {
         }
         for s in self.serials_of(kind) {
             self.send_leds(&s);
+        }
+    }
+
+    fn send_one_led(&self, zone: LedZone, mode: Option<LedMode>, color: Option<Rgb>, brightness: Option<u8>) {
+        let (kind, idx) = match zone {
+            LedZone::Base => (ModuleKind::Base, 0),
+            LedZone::Knob(i) => (ModuleKind::Knob, i),
+            LedZone::Fader(i) => (ModuleKind::Fader, i),
+        };
+        let t = LedTarget::Index(idx);
+        let mut reports = Vec::new();
+        reports.extend(mode.and_then(|m| led_mode(kind, t, m)));
+        reports.extend(color.and_then(|c| led_color(kind, t, c)));
+        reports.extend(brightness.and_then(|b| led_brightness(kind, t, b)));
+        if reports.is_empty() {
+            return;
+        }
+        for m in self.modules.values().filter(|m| m.info.kind == kind) {
+            let _ = m.tx.send(DeviceCmd::Output(reports.clone()));
         }
     }
 
