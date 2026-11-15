@@ -51,6 +51,6 @@ profile switches and Claude session jumps, without implementing them itself:
 
 ```json
 {"id":6,"method":"run_action","params":{"action":{"keys":"ctrl+shift+t"}}}
-{"id":7,"method":"run_action","params":{"action":{"volume":"+2","app":"focused"}}}
+{"id":7,"method":"run_action","params":{"action":{"volume":{"level":"+2","app":"discord"}}}}
 {"id":8,"method":"run_action","params":{"action":{"session":0}}}
 ```

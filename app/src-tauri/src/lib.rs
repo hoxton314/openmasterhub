@@ -214,6 +214,7 @@ fn forward_events(app: AppHandle, rx: std::sync::mpsc::Receiver<ClientEvent>) {
                     if ours { Ok(()) } else { app.emit("hub:config-changed", ()) }
                 }
                 ClientEvent::Event(Event::Claim(c)) => app.emit("hub:claim", c),
+                ClientEvent::Event(Event::Sessions(s)) => app.emit("hub:sessions", s),
             };
             if let Err(e) = r {
                 log::warn!("emit: {e}");

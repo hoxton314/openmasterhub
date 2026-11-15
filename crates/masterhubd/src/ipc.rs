@@ -165,12 +165,13 @@ fn handle(
             controller.send(Msg::ShowPage(name))?;
             json(())
         }
-        Request::SetStatus { source, status, pid, background } => {
-            controller.send(Msg::SetStatus { source, status, pid, background })?;
+        Request::SetStatus { source, status, pid, background, detail } => {
+            controller.send(Msg::SetStatus { source, status, pid, background, detail })?;
             json(())
         }
         Request::GetOpenApps => json(crate::focus::open_apps()?),
         Request::GetAudio => json(crate::audio::info()),
+        Request::GetSessions => json(&snapshot.lock().unwrap().sessions),
         Request::Claim { name, controls, apps, priority } => {
             if controls.is_empty() {
                 bail!("claim names no controls");

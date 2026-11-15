@@ -41,7 +41,13 @@ pub enum Msg {
     ShowPage(String),
     /// A tool's status for the Base LED; `None` forgets the source. `background`: from work in
     /// the background of the source (see [`reported_status`]).
-    SetStatus { source: String, status: Option<Status>, pid: Option<u32>, background: bool },
+    SetStatus {
+        source: String,
+        status: Option<Status>,
+        pid: Option<u32>,
+        background: bool,
+        detail: Option<masterhub_core::ipc::SessionDetail>,
+    },
     /// Live surface (see [`crate::surface`]).
     Claim { claim: u64, name: String, controls: Controls, apps: Vec<String>, priority: i32 },
     Release { claim: u64 },
@@ -60,6 +66,7 @@ pub struct Snapshot {
     pub modules: Vec<ModuleState>,
     pub state: HubState,
     pub displays: BTreeMap<(String, u8), Arc<Vec<u8>>>,
+    pub sessions: Vec<masterhub_core::ipc::SessionInfo>,
 }
 
 struct Module {
@@ -105,6 +112,8 @@ struct Reporter {
     remote: bool,
     /// When it last reported.
     reported: Instant,
+    /// What it is doing (Claude Code sessions), from its last hook event that said so.
+    detail: masterhub_core::ipc::SessionDetail,
 }
 
 pub struct Controller {
@@ -295,7 +304,7 @@ impl Controller {
                 }
             }
             Msg::ShowPage(name) => self.show_page(&name),
-            Msg::SetStatus { source, status, pid, background } => {
+            Msg::SetStatus { source, status, pid, background, detail } => {
                 log::debug!("status {source}: {status:?}{}", if background { " (background)" } else { "" });
                 match status {
                     Some(status) => {
@@ -304,6 +313,9 @@ impl Controller {
                         let status = reported_status(old.as_ref().map(|r| r.status), status, background);
                         let mut r = old.unwrap_or_else(|| Reporter::new(status, pid, None, &mut self.reports));
                         r.set(status, &mut self.reports);
+                        if let Some(d) = detail {
+                            r.detail = d;
+                        }
                         (r.pid, r.file, r.discovered, r.remote, r.reported) = (pid, file, false, false, Instant::now());
                         self.statuses.insert(source, r);
                     }
@@ -313,6 +325,7 @@ impl Controller {
                 }
                 self.update_status();
                 self.refresh_sessions();
+                self.publish_sessions();
             }
             Msg::Claim { claim, name, controls, apps, priority } => {
                 log::info!("{name} claims {controls:?} (apps {apps:?}, priority {priority}) as #{claim}");
@@ -328,13 +341,7 @@ impl Controller {
                     self.reclaim();
                 }
             }
-            Msg::RunAction { action, value } => {
-                if let Action::Session(slot) = action {
-                    self.bring_up(slot);
-                } else if !self.navigate(&action) {
-                    let _ = self.actions.send(Request { action, value, coalesce: None });
-                }
-            }
+            Msg::RunAction { action, value } => self.run_action(action, value, None),
             Msg::Frame { claim, target, jpeg } => {
                 let Some(c) = self.claims.get_mut(claim) else { return };
                 c.frames.insert(target, jpeg);
@@ -813,6 +820,34 @@ impl Controller {
         if changed {
             self.update_status();
         }
+        // Names come from the session files and change at any time.
+        self.publish_sessions();
+    }
+
+    /// Tell clients about the open sessions when anything about them changed.
+    fn publish_sessions(&mut self) {
+        let list: Vec<masterhub_core::ipc::SessionInfo> = self
+            .sessions()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(slot, r)| {
+                let source = self.statuses.iter().find(|(_, x)| std::ptr::eq(*x, r)).map(|(s, _)| s.clone())?;
+                Some(masterhub_core::ipc::SessionInfo {
+                    slot: slot as u8,
+                    source,
+                    name: r.file.as_ref().and_then(SessionFile::title).unwrap_or_else(|| "Claude".to_owned()),
+                    status: r.status,
+                    since: r.changed_at,
+                    detail: r.detail.clone(),
+                })
+            })
+            .collect();
+        let mut snap = self.snapshot.lock().unwrap();
+        if snap.sessions != list {
+            snap.sessions = list.clone();
+            drop(snap);
+            self.events.send(Event::Sessions(list));
+        }
     }
 
     /// Add, update and drop the sessions the desktop app runs over SSH; whether any changed.
@@ -1186,26 +1221,25 @@ impl Controller {
                 continue;
             }
             if let Some(action) = self.binding(control, index, event) {
-                match &action {
-                    Action::Session(slot) => {
-                        self.bring_up(*slot);
-                        continue;
-                    }
-                    Action::Sessions(dir) => {
-                        self.scroll_sessions(dir);
-                        continue;
-                    }
-                    _ => {}
-                }
                 let coalesce = (control == "fader").then(|| format!("{serial}/fader{index}"));
-                if !self.navigate(&action) {
-                    let audio = match &action {
-                        Action::Volume(v) => crate::audio::Target::resolve(&v.target, &self.config.audio_groups),
-                        Action::Mute(m) => crate::audio::Target::resolve(&m.target, &self.config.audio_groups),
-                        _ => None,
-                    };
-                    let _ = self.actions.send(Request { action, value, coalesce, audio });
-                }
+                self.run_action(action, value, coalesce);
+            }
+        }
+    }
+
+    /// Run an action from a control or a `run_action` request.
+    fn run_action(&mut self, action: Action, value: Option<u8>, coalesce: Option<String>) {
+        match &action {
+            Action::Session(slot) => self.bring_up(*slot),
+            Action::Sessions(dir) => self.scroll_sessions(dir),
+            _ if self.navigate(&action) => {}
+            _ => {
+                let audio = match &action {
+                    Action::Volume(v) => crate::audio::Target::resolve(&v.target, &self.config.audio_groups),
+                    Action::Mute(m) => crate::audio::Target::resolve(&m.target, &self.config.audio_groups),
+                    _ => None,
+                };
+                let _ = self.actions.send(Request { action, value, coalesce, audio });
             }
         }
     }
@@ -1361,6 +1395,7 @@ impl Reporter {
             discovered: false,
             remote: false,
             reported: Instant::now(),
+            detail: Default::default(),
         };
         *seq += 1;
         r

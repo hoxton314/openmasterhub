@@ -15,16 +15,17 @@
 //! | `get_displays` | | `Vec<DisplayImage>` |
 //! | `set_profile` | `name` | switch profile (until the focused app changes) |
 //! | `show_page` | `name` | show a keypad page or folder of the active profile |
-//! | `set_status` | `source`, `status`, `pid`, `background` | set (or clear, `status: null`) a tool's [`Status`] |
+//! | `set_status` | `source`, `status`, `pid`, `background`, `detail` | set (or clear, `status: null`) a tool's [`Status`] |
 //! | `get_open_apps` | | window classes (`.exe` names on Windows) of open windows, sorted |
 //! | `get_audio` | | [`AudioInfo`]: apps playing audio, output and input devices |
+//! | `get_sessions` | | open Claude Code sessions, `Vec<SessionInfo>` (also the `sessions` event) |
 //! | `claim` | `name`, `controls`, `apps`, `priority` | take over controls (live surface), `{"claim": id}` |
 //! | `release` | `claim` | give them back |
 //! | `run_action` | `action` (as in the config, e.g. `{"keys":"ctrl+c"}`), `value`? | run it now |
 //! | `frame` | `claim`, `target`, `jpeg` (base64) | show an image on a claimed key (0..=14) or the dial (255) |
 //! | `led` | `claim`, `zone`, `mode`, `color`, `brightness` | set a claimed LED |
 //!
-//! Events: `input`, `state`, `modules`, `display`, `config_changed`, `claim`.
+//! Events: `input`, `state`, `modules`, `display`, `config_changed`, `claim`, `sessions`.
 //!
 //! ## Live surface
 //!
@@ -197,9 +198,14 @@ pub enum Request {
         /// a `working` report then turns `ready` into `working` but never hides `attention`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         background: bool,
+        /// What the session is doing, from the main agent's hook events; replaces the last.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<SessionDetail>,
     },
     GetOpenApps,
     GetAudio,
+    /// The open Claude Code sessions, in slot order (`Vec<SessionInfo>`).
+    GetSessions,
     /// Take over controls; the result is `{"claim": id}`. See the module docs.
     Claim {
         name: String,
@@ -259,6 +265,36 @@ pub enum Event {
     Display(DisplayImage),
     ConfigChanged,
     Claim(ClaimState),
+    /// The open Claude Code sessions changed (see `get_sessions`).
+    Sessions(Vec<SessionInfo>),
+}
+
+/// What a Claude Code session is doing, beyond its status (from its hooks).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionDetail {
+    /// e.g. "Edit render.rs", "Bash cargo test", "Thinking"; none while waiting for a prompt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doing: Option<String>,
+    /// The session's transcript (JSONL), for its last words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+}
+
+/// One open Claude Code session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionInfo {
+    /// Its slot: 0 = the oldest open session (the `session` action and widget use it).
+    pub slot: u8,
+    pub source: String,
+    pub name: String,
+    pub status: Status,
+    /// When the status last changed, Unix milliseconds.
+    pub since: u64,
+    #[serde(flatten)]
+    pub detail: SessionDetail,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -447,10 +483,10 @@ impl Client {
 mod tests {
     #[test]
     fn run_action_takes_config_actions() {
-        let r: RequestMsg = serde_json::from_str(r#"{"id":3,"method":"run_action","params":{"action":{"volume":"+2","app":"focused"}}}"#).unwrap();
+        let r: RequestMsg = serde_json::from_str(r#"{"id":3,"method":"run_action","params":{"action":{"volume":{"level":"+2","app":"discord"}}}}"#).unwrap();
         let Request::RunAction { action, value } = r.request else { panic!("not run_action") };
         assert_eq!(value, None);
-        assert!(matches!(action, crate::config::Action::AppVolume { .. }));
+        assert!(matches!(action, crate::config::Action::Volume(v) if v.target == crate::config::AudioTarget::App("discord".into())));
         let r: RequestMsg = serde_json::from_str(r#"{"id":4,"method":"run_action","params":{"action":{"keys":"ctrl+c"}}}"#).unwrap();
         assert!(matches!(r.request, Request::RunAction { action: crate::config::Action::Keys(_), .. }));
     }
@@ -469,7 +505,13 @@ mod tests {
 
         let r = RequestMsg {
             id: 2,
-            request: Request::SetStatus { source: "claude:x".into(), status: Some(Status::Attention), pid: None, background: false },
+            request: Request::SetStatus {
+                source: "claude:x".into(),
+                status: Some(Status::Attention),
+                pid: None,
+                background: false,
+                detail: None,
+            },
         };
         assert_eq!(
             serde_json::to_string(&r).unwrap(),
