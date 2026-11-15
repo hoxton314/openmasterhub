@@ -146,8 +146,8 @@ fn handle(request: Request, controller: &Sender<Msg>, snapshot: &Mutex<Snapshot>
             controller.send(Msg::ShowPage(name))?;
             json(())
         }
-        Request::SetStatus { source, status, pid } => {
-            controller.send(Msg::SetStatus { source, status, pid })?;
+        Request::SetStatus { source, status, pid, background } => {
+            controller.send(Msg::SetStatus { source, status, pid, background })?;
             json(())
         }
     }
