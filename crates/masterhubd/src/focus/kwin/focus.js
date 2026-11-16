@@ -5,18 +5,29 @@
 // and should not switch profiles.
 var IGNORED = ["plasmashell", "org.kde.plasmashell", "krunner", "org.kde.krunner"];
 
-function report(w) {
+function send(method, arg) {
+    callDBus("org.openmasterhub.Focus", "/org/openmasterhub/Focus", "org.openmasterhub.Focus1", method, arg);
+}
+
+// Errors go to masterhubd's log, where they are easier to find than in KWin's.
+function guarded(f) {
+    return function (w) {
+        try {
+            f(w);
+        } catch (e) {
+            send("ScriptError", String(e));
+        }
+    };
+}
+
+var report = guarded(function (w) {
     if (w && (w.specialWindow || w.dock || w.desktopWindow || IGNORED.indexOf(String(w.resourceClass)) >= 0)) {
         return;
     }
-    callDBus(
-        "org.openmasterhub.Focus",
-        "/org/openmasterhub/Focus",
-        "org.openmasterhub.Focus1",
-        "ActiveWindow",
-        w ? String(w.resourceClass) : ""
-    );
-}
+    send("ActiveWindow", w ? String(w.resourceClass) : "");
+});
 
-(workspace.windowActivated || workspace.clientActivated).connect(report);
-report(workspace.activeWindow !== undefined ? workspace.activeWindow : workspace.activeClient);
+guarded(function () {
+    (workspace.windowActivated || workspace.clientActivated).connect(report);
+    report(workspace.activeWindow !== undefined ? workspace.activeWindow : workspace.activeClient);
+})();

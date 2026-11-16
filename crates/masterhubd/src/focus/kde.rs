@@ -65,6 +65,11 @@ impl Focus {
         let _ = self.controller.send(Msg::ActiveApp(class.to_owned()));
     }
 
+    /// Called by the focus script when it throws, so the error lands in this log.
+    fn script_error(&self, message: &str) {
+        log::warn!("KWin focus script error: {message}");
+    }
+
     /// Called by a raise script when it is done.
     fn raised(&self, token: &str, found: bool) {
         self.reply(token, Reply::Raised(found));
@@ -89,14 +94,48 @@ pub fn spawn(controller: Sender<Msg>) {
         .name("kde-focus".into())
         .spawn(move || {
             let pending = Pending::default();
-            let conn = match serve(controller, pending.clone()) {
-                Ok(conn) => conn,
-                Err(e) => return log::warn!("KDE focus service unavailable: {e}"),
-            };
+            let Some(conn) = serve_when_free(controller, pending.clone()) else { return };
             let _ = SERVICE.set(Service { conn: conn.clone(), pending });
             follow_kwin(&conn);
         })
         .expect("spawn kde focus thread");
+}
+
+/// Serve the focus interface, waiting while another program (usually a second masterhubd)
+/// owns the name: KWin would send our focus reports to it.
+fn serve_when_free(controller: Sender<Msg>, pending: Pending) -> Option<Connection> {
+    let mut warned = false;
+    loop {
+        match serve(controller.clone(), pending.clone()) {
+            Ok(conn) => {
+                if warned {
+                    log::info!("{BUS_NAME} is free now");
+                }
+                return Some(conn);
+            }
+            Err(zbus::Error::NameTaken) => {
+                if !warned {
+                    let who = owner_pid(BUS_NAME).map_or_else(String::new, |pid| format!(" (process {pid})"));
+                    log::warn!("another program{who} owns {BUS_NAME}, so focus reports from KWin go there; is a second masterhubd running? Waiting for it to exit");
+                    warned = true;
+                }
+                thread::sleep(Duration::from_secs(5));
+            }
+            Err(e) => {
+                log::warn!("KDE focus service unavailable: {e}");
+                return None;
+            }
+        }
+    }
+}
+
+/// The process that owns a bus name.
+fn owner_pid(name: &str) -> Option<u32> {
+    let conn = Connection::session().ok()?;
+    let reply = conn
+        .call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus", Some("org.freedesktop.DBus"), "GetConnectionUnixProcessID", &(name,))
+        .ok()?;
+    reply.body().deserialize().ok()
 }
 
 /// Owning the well-known name also keeps a second masterhubd from loading the script too.
@@ -123,9 +162,11 @@ fn follow_kwin(conn: &Connection) -> ! {
 /// Load the focus script, then check that it reports: it does once as soon as it runs.
 fn load_focus_script(conn: &Connection) {
     // An earlier masterhubd of this branch loaded it under the old name.
+    log::info!("KWin is running; loading the focus script");
     unload(conn, LEGACY_FOCUS_PLUGIN);
     REPORTED.store(false, Ordering::Relaxed);
-    if let Err(e) = run_script(conn, &write_script("focus.js", FOCUS_JS), FOCUS_PLUGIN) {
+    let path = write_script("focus.js", FOCUS_JS);
+    if let Err(e) = run_script(conn, &path, FOCUS_PLUGIN) {
         return log::warn!("loading the KWin focus script: {e:#}");
     }
     for _ in 0..50 {
@@ -134,7 +175,19 @@ fn load_focus_script(conn: &Connection) {
         }
         thread::sleep(Duration::from_millis(100));
     }
-    log::warn!("KWin loaded the focus script but it never reported; look for KWin scripting errors in `journalctl --user -b`");
+    // Tell apart a script KWin dropped (it failed to read or run it) from one that runs silently.
+    let loaded = scripting(conn, "isScriptLoaded", &(FOCUS_PLUGIN,)).and_then(|r| r.body().deserialize::<bool>());
+    match loaded {
+        Ok(true) => log::warn!(
+            "KWin has the focus script ({}) loaded, but it never reported a window; focus changes will not switch profiles",
+            path.display()
+        ),
+        Ok(false) => log::warn!(
+            "KWin dropped the focus script ({}) without running it; look for its error with `journalctl --user -b | grep -i focus.js`",
+            path.display()
+        ),
+        Err(e) => log::warn!("the KWin focus script never reported, and KWin did not answer: {e}"),
+    }
 }
 
 /// The unique bus name of the running KWin.
@@ -163,7 +216,8 @@ fn run_script(conn: &Connection, path: &std::path::Path, plugin: &str) -> Result
     if id < 0 {
         bail!("KWin refused to load {path}");
     }
-    scripting(conn, "start", &())?;
+    log::debug!("KWin loaded {plugin} as script {id}");
+    scripting(conn, "start", &()).context("starting the script")?;
     Ok(())
 }
 
@@ -270,5 +324,6 @@ mod tests {
         assert_eq!(p.get(1).copied(), Some(std::os::unix::process::parent_id()).filter(|&p| p > 1));
     }
 }
+
 
 
