@@ -21,10 +21,16 @@ function guarded(f) {
 }
 
 var report = guarded(function (w) {
-    if (w && (w.specialWindow || w.dock || w.desktopWindow || IGNORED.indexOf(String(w.resourceClass)) >= 0)) {
+    // Clicking the desktop focuses Plasma's desktop window (class plasmashell): no app, so the
+    // default profile.
+    if (!w || w.desktopWindow) {
+        send("ActiveWindow", "");
         return;
     }
-    send("ActiveWindow", w ? String(w.resourceClass) : "");
+    if (w.specialWindow || w.dock || IGNORED.indexOf(String(w.resourceClass)) >= 0) {
+        return;
+    }
+    send("ActiveWindow", String(w.resourceClass));
 });
 
 guarded(function () {
