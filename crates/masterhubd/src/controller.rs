@@ -79,6 +79,8 @@ struct Reporter {
     /// Found in the session files rather than reported by a hook; its status follows the file
     /// until the first hook event.
     discovered: bool,
+    /// Runs on another machine over SSH, known from the desktop app's session files only.
+    remote: bool,
     /// When it last reported.
     reported: Instant,
 }
@@ -106,6 +108,8 @@ pub struct Controller {
     events: Arc<Broadcaster>,
     /// Tool status per source, with the process that reported it.
     statuses: HashMap<String, Reporter>,
+    /// The Claude desktop app's sessions, for those it runs over SSH.
+    desktop: crate::claude::desktop::DesktopSessions,
     /// Counts status reports, to order sessions that started at the same time.
     reports: u64,
     /// Advances every tick; animates working sessions.
@@ -158,6 +162,7 @@ impl Controller {
             snapshot,
             events,
             statuses: HashMap::new(),
+            desktop: Default::default(),
             reports: 0,
             ticks: 0,
             shown_status: None,
@@ -253,7 +258,7 @@ impl Controller {
                         let first = old.map(|r| r.first).unwrap_or(self.reports);
                         let status = reported_status(old.map(|r| r.status), status, background);
                         self.reports += 1;
-                        let r = Reporter { status, pid, first, file, discovered: false, reported: Instant::now() };
+                        let r = Reporter { status, pid, first, file, discovered: false, remote: false, reported: Instant::now() };
                         self.statuses.insert(source, r);
                     }
                     None => {
@@ -558,6 +563,7 @@ impl Controller {
                         first: self.reports,
                         file: Some(file),
                         discovered: true,
+                        remote: false,
                         reported: Instant::now(),
                     };
                     self.reports += 1;
@@ -566,9 +572,45 @@ impl Controller {
                 }
             }
         }
+        changed |= self.follow_remote_sessions();
         if changed {
             self.update_status();
         }
+    }
+
+    /// Add, update and drop the sessions the desktop app runs over SSH; whether any changed.
+    fn follow_remote_sessions(&mut self) -> bool {
+        let remote = self.desktop.remote();
+        let mut changed = false;
+        for s in &remote {
+            match self.statuses.get_mut(&s.source) {
+                // Its hooks reach this service after all.
+                Some(r) if !r.remote => {}
+                Some(r) => {
+                    changed |= r.status != s.status || r.file.as_ref() != Some(&s.file);
+                    r.status = s.status;
+                    r.file = Some(s.file.clone());
+                }
+                None => {
+                    log::info!("found remote Claude Code session {} ({})", s.source, s.file.title().unwrap_or_default());
+                    let r = Reporter {
+                        status: s.status,
+                        pid: None,
+                        first: self.reports,
+                        file: Some(s.file.clone()),
+                        discovered: true,
+                        remote: true,
+                        reported: Instant::now(),
+                    };
+                    self.reports += 1;
+                    self.statuses.insert(s.source.clone(), r);
+                    changed = true;
+                }
+            }
+        }
+        let before = self.statuses.len();
+        self.statuses.retain(|source, r| !r.remote || remote.iter().any(|s| &s.source == source));
+        changed || self.statuses.len() != before
     }
 
     // ───────────────────────────── Claude Code sessions ─────────────────────────────

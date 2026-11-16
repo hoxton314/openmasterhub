@@ -6,6 +6,8 @@
 //! Claude Code passes the hook event as JSON on stdin. The hook prints nothing (stdout of some
 //! hooks becomes model context) and always succeeds, so it never gets in Claude's way.
 
+pub mod desktop;
+
 use std::io::Read;
 use std::path::PathBuf;
 
