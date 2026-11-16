@@ -63,6 +63,7 @@ identical while other platforms are added.
 
 - Action library: media controls without `playerctl`, per-app volume, OBS (websocket).
 - Focus tracking beyond Hyprland and KDE on Linux: GNOME (extension), Sway (IPC).
-- Base tilt sensor: input `0x2B` reported once and then went silent; orientation currently comes
-  from the config (`landscape` by default).
+- Base tilt sensor: input `0x2B` is sent only on some changes and never while the Base lies flat,
+  and feature `0x35` is empty, so `auto` stays landscape until a report arrives. Still to confirm:
+  which edge down gives `1` (issue 13 reports it may be inverted).
 - Confirm which physical roller is "left" when the roller module is rotated.

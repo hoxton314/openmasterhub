@@ -69,7 +69,8 @@ fn is_true(b: &bool) -> bool {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Orientation {
-    /// Follow the Base's tilt sensor when it reports; landscape until then.
+    /// Follow the Base's tilt sensor when it reports; landscape until then. The sensor is
+    /// silent while the Base lies flat, so in practice this is often plain landscape.
     #[default]
     Auto,
     Portrait,
