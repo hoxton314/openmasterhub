@@ -14,6 +14,25 @@ On the Base, with several sessions open, the most urgent one wins:
 Works on Linux and Windows. The service forgets a session whose `claude` process has exited,
 even if it never sent `SessionEnd`.
 
+### Sessions over SSH
+
+The Claude desktop app can run a session on another machine over SSH. Its `claude` process and
+its hooks run on that machine, so they can't reach the service. For those sessions the service
+reads the desktop app's own session files instead
+(`~/.config/Claude/claude-code-sessions/`, `%APPDATA%\Claude\claude-code-sessions\` on
+Windows), which say when a turn starts and ends:
+
+- A remote session gets a key while it was active in the last 12 hours, or while a turn runs.
+- It is **working** during a turn, and while a session it started (a side session) is still in
+  a turn; otherwise **ready**. A turn whose file hasn't changed for 3 hours counts as over (the
+  app quit in the middle of it).
+- The files don't record permission prompts or questions, so a remote session never shows
+  **attention**.
+- Pressing its key opens it in the desktop app.
+
+These files are the desktop app's internal format, not a documented API: if an update changes
+them, remote sessions just stop appearing.
+
 ## Set up
 
 1. Make sure `masterhubd` is running (Linux: `systemctl --user status masterhubd`, Windows: the
