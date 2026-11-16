@@ -17,6 +17,7 @@
 //! | `show_page` | `name` | show a keypad page or folder of the active profile |
 //! | `set_status` | `source`, `status`, `pid`, `background` | set (or clear, `status: null`) a tool's [`Status`] |
 //! | `get_open_apps` | | window classes (`.exe` names on Windows) of open windows, sorted |
+//! | `get_audio` | | [`AudioInfo`]: apps playing audio, output and input devices |
 //!
 //! Events: `input`, `state`, `modules`, `display`, `config_changed`.
 
@@ -126,6 +127,18 @@ pub enum Request {
         background: bool,
     },
     GetOpenApps,
+    GetAudio,
+}
+
+/// Suggestions for the targets of volume and mute actions.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AudioInfo {
+    /// Names of the apps playing audio now.
+    pub apps: Vec<String>,
+    /// Output device descriptions.
+    pub outputs: Vec<String>,
+    /// Input device descriptions, without the monitors of outputs.
+    pub inputs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -321,6 +334,9 @@ impl Client {
     }
     pub fn open_apps(&self) -> Result<Vec<String>> {
         self.get(Request::GetOpenApps)
+    }
+    pub fn audio(&self) -> Result<AudioInfo> {
+        self.get(Request::GetAudio)
     }
 }
 

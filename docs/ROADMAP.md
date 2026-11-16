@@ -24,7 +24,11 @@ identical while other platforms are added.
     LibreHardwareMonitor's (or OpenHardwareMonitor's) WMI namespace while it runs
     (`stats/windows.rs`).
   - built-in `volume = "+2" | "40" | "{value}"` and `mute = "toggle" | "on" | "off"` actions
-    (`wpctl` on Linux, Core Audio on Windows), used by the examples and the app.
+    (Core Audio on Windows), used by the examples and the app.
+  - volume and mute of other outputs, inputs, apps and `[[audio_group]]`s (issue 28), through
+    the PulseAudio protocol on Linux (PulseAudio or `pipewire-pulse`, so no `wpctl` needed) and
+    `ISimpleAudioVolume` per audio session on Windows. App levels set by a fader are given to
+    apps that start later. Windows sessions are untested on hardware.
   - first run on Windows writes `examples/starter.toml`, which uses only built-in actions.
   - Claude Code status: the hook finds the `claude` process and the service drops sessions
     whose process exited, as on Linux.
@@ -43,11 +47,11 @@ identical while other platforms are added.
      Prolific hubs to be visible, which a VM hides. The app's picture of the hub depends on it.
    - installer + autostart + update over an existing install, and the starter config.
    - focus profiles for common exes (`msedge.exe`, `chrome.exe`, `Discord.exe`, games).
+   - per-app and group volume (Discord, Spotify, a Steam game) and microphone volume.
    - Claude Code hooks through Git Bash with the full path from `docs/CLAUDE_CODE.md`.
 2. **Code signing** for the installer (SmartScreen warns today). Needs a certificate decision
    from the maintainer: a paid OV/EV certificate or Azure Trusted Signing. Then sign in
    `build-windows.yml`.
-3. **Per-app volume** (`ISimpleAudioVolume` / PipeWire nodes); the vendor app has this too.
 
 ## Then: macOS
 
@@ -55,13 +59,15 @@ identical while other platforms are added.
   for HID access.
 - Key injection: `CGEventPost` (needs Accessibility permission).
 - Focus: `NSWorkspace` frontmost application (bundle id).
+- Audio: output and input volume through CoreAudio; per-app volume needs a virtual audio
+  driver, so leave it out.
 - Widgets: CoreAudio volume, `MediaRemote` now playing (private framework) or skip, IOKit /
   SMC temperatures.
 - Packaging: Tauri `.app`/`.dmg`, notarisation, LaunchAgent for the service.
 
 ## Anytime
 
-- Action library: media controls without `playerctl`, per-app volume, OBS (websocket).
+- Action library: media controls without `playerctl`, OBS (websocket).
 - Focus tracking beyond Hyprland and KDE on Linux: GNOME (extension), Sway (IPC).
 - Base tilt sensor: input `0x2B` is sent only on some changes and never while the Base lies flat,
   and feature `0x35` is empty, so `auto` stays landscape until a report arrives. Still to confirm:

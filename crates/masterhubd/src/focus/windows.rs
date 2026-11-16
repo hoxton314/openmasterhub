@@ -60,7 +60,7 @@ pub fn window_classes() -> Result<Vec<String>> {
 }
 
 /// File name of a process's program, e.g. `obs64.exe`.
-fn exe_name(pid: u32) -> Option<String> {
+pub fn exe_name(pid: u32) -> Option<String> {
     // SAFETY: plain Win32 calls; the process handle is closed before returning and the buffer
     // outlives the call that fills it.
     unsafe {

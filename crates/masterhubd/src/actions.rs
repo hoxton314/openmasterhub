@@ -20,6 +20,8 @@ pub struct Request {
     /// Requests with the same key are coalesced: while a command for that key is still
     /// running, only the newest pending request is kept (fader drags send many updates).
     pub coalesce: Option<String>,
+    /// For `volume` and `mute`: their target, with audio groups resolved by the controller.
+    pub audio: Option<audio::Target>,
 }
 
 pub fn spawn() -> Sender<Request> {
@@ -42,19 +44,23 @@ fn run(rx: Receiver<Request>) {
                         log::error!("keys {combo:?}: {e:#}");
                     }
                 }
-                Action::Volume(v) => match VolumeChange::parse(&v, req.value) {
-                    Some(change) => {
-                        if let Err(e) = audio::set_volume(change) {
+                Action::Volume(v) => match (VolumeChange::parse(&v.level, req.value), &req.audio) {
+                    (Some(change), Some(target)) => {
+                        if let Err(e) = audio::set_volume(target, change) {
                             log::error!("volume {v:?}: {e:#}");
                         }
                     }
-                    None => log::error!("volume {v:?}: invalid"),
+                    (None, _) => log::error!("volume {v:?}: invalid"),
+                    (_, None) => log::error!("volume {v:?}: unknown audio group"),
                 },
-                Action::Mute(m) => {
-                    if let Err(e) = audio::set_mute(m) {
-                        log::error!("mute {m:?}: {e:#}");
+                Action::Mute(m) => match &req.audio {
+                    Some(target) => {
+                        if let Err(e) = audio::set_mute(target, m.state) {
+                            log::error!("mute {m:?}: {e:#}");
+                        }
                     }
-                }
+                    None => log::error!("mute {m:?}: unknown audio group"),
+                },
                 // Navigation and sessions are handled by the controller and never reach this thread.
                 Action::Page(_) | Action::Folder(_) | Action::Back(_) | Action::Profile(_) | Action::Session(_) => {}
                 Action::Cmd(cmd) => {

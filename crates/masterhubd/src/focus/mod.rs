@@ -60,7 +60,7 @@ fn parent_pid(pid: u32) -> Option<u32> {
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
-pub use self::windows::{raise, spawn};
+pub use self::windows::{exe_name, raise, spawn};
 
 /// Focus the window of a process, or of its nearest ancestor that has one.
 #[cfg(not(any(target_os = "linux", windows)))]
