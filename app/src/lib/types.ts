@@ -9,11 +9,33 @@ export type Action =
   | { folder: string }
   | { back: boolean }
   | { profile: string }
-  | { volume: string } // "+2", "-2", "40" or "{value}"
-  | { mute: Mute }
+  | { volume: string | ({ level: string } & AudioTarget) } // "+2", "-2", "40" or "{value}"
+  | { mute: Mute | ({ state: Mute } & AudioTarget) }
   | { session: number }; // slot of a Claude Code session
 
 export type Mute = 'toggle' | 'on' | 'off';
+
+/** What a volume or mute action controls; none set is the default output. Devices are
+ * "default" or a name, apps a program name, groups an `audio_group` name. */
+export interface AudioTarget {
+  output?: string;
+  input?: string;
+  app?: string;
+  group?: string;
+}
+
+export interface AudioGroup {
+  name: string;
+  apps?: string[];
+  steam?: boolean;
+}
+
+/** `get_audio`: apps playing audio now and the devices. */
+export interface AudioInfo {
+  apps: string[];
+  outputs: string[];
+  inputs: string[];
+}
 
 export type Widget =
   | { kind: 'clock'; format?: string }
@@ -116,6 +138,7 @@ export interface Config {
   upright?: boolean;
   pinned?: PinnedKey[];
   profile?: Profile[];
+  audio_group?: AudioGroup[];
 }
 
 export interface Placement {

@@ -1,10 +1,18 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { ArrowLeft, ArrowRight, Ban, Bot, ChevronDown, CornerUpLeft, Folder, Keyboard, LayoutGrid, Terminal, UserRound, Volume2, VolumeX } from 'lucide-svelte';
-  import { currentProfile, describe, hub } from '../lib/hub.svelte';
-  import type { Action, Mute } from '../lib/types';
+  import { invoke } from '../lib/backend';
+  import { currentProfile, describe, edit, hub, toast } from '../lib/hub.svelte';
+  import { ui } from '../lib/ui.svelte';
+  import type { Action, AudioInfo, AudioTarget, Mute } from '../lib/types';
 
-  let { title, value, onchange }: { title: string; value: Action | undefined; onchange: (a: Action | undefined) => void } = $props();
+  let {
+    title,
+    value,
+    onchange,
+    fader = false,
+  }: { title: string; value: Action | undefined; onchange: (a: Action | undefined) => void; fader?: boolean } = $props();
+  const uid = $props.id();
 
   const KINDS = [
     { k: 'none', label: 'Nothing', icon: Ban },
@@ -26,6 +34,17 @@
   /** Same forms as `VolumeChange::parse` in masterhub-core. */
   const VOLUME = /^\s*([+-]\s*\d+|\d{1,2}|100|\{value\})\s*$/;
   const WINDOWS = navigator.userAgent.includes('Windows');
+  /** What volume and mute act on. */
+  const TARGETS = [
+    { t: 'output', label: 'Default output' },
+    { t: 'output-device', label: 'Output device' },
+    { t: 'input', label: 'Microphone (default input)' },
+    { t: 'input-device', label: 'Input device' },
+    { t: 'app', label: 'App' },
+    { t: 'group', label: 'App group' },
+  ] as const;
+  type TargetKind = (typeof TARGETS)[number]['t'];
+  const NEW_GROUP = '\u0000new';
 
   function kindOf(a: Action | undefined): Kind {
     if (!a) return 'none';
@@ -43,8 +62,8 @@
     if (!a) return '';
     if ('cmd' in a) return a.cmd;
     if ('keys' in a) return a.keys;
-    if ('volume' in a) return a.volume;
-    if ('mute' in a) return a.mute;
+    if ('volume' in a) return typeof a.volume === 'string' ? a.volume : a.volume.level;
+    if ('mute' in a) return typeof a.mute === 'string' ? a.mute : a.mute.state;
     if ('page' in a) return a.page === 'next' || a.page === 'prev' ? '' : a.page;
     if ('folder' in a) return a.folder;
     if ('profile' in a) return a.profile;
@@ -52,10 +71,47 @@
     return '';
   }
 
+  function targetOf(a: Action | undefined): [TargetKind, string] {
+    const t: AudioTarget | undefined =
+      a && 'volume' in a && typeof a.volume !== 'string' ? a.volume : a && 'mute' in a && typeof a.mute !== 'string' ? a.mute : undefined;
+    const device = (d: string, k: TargetKind, named: TargetKind): [TargetKind, string] => (d === 'default' || !d ? [k, ''] : [named, d]);
+    if (t?.input !== undefined) return device(t.input, 'input', 'input-device');
+    if (t?.app !== undefined) return ['app', t.app];
+    if (t?.group !== undefined) return ['group', t.group];
+    if (t?.output !== undefined) return device(t.output, 'output', 'output-device');
+    return ['output', ''];
+  }
+  function targetKeys(): AudioTarget | undefined {
+    switch (target) {
+      case 'output-device': return tname ? { output: tname } : undefined;
+      case 'input': return { input: 'default' };
+      case 'input-device': return tname ? { input: tname } : undefined;
+      case 'app': return tname ? { app: tname } : undefined;
+      case 'group': return tname ? { group: tname } : undefined;
+      default: return undefined;
+    }
+  }
+
   let open = $state(false);
   // Rebuilt when the selection changes, so the initial value is all it needs.
   let kind = $state<Kind>(untrack(() => kindOf(value)));
   let arg = $state(untrack(() => argOf(value)));
+  let target = $state<TargetKind>(untrack(() => targetOf(value)[0]));
+  let tname = $state(untrack(() => targetOf(value)[1]));
+  let audio = $state<AudioInfo>({ apps: [], outputs: [], inputs: [] });
+  let audioLoaded = false;
+
+  // Suggestions for devices and apps, once the editor shows an audio action.
+  $effect(() => {
+    if (!open || (kind !== 'volume' && kind !== 'mute') || audioLoaded) return;
+    audioLoaded = true;
+    invoke<AudioInfo>('audio_info')
+      .then((a) => (audio = a))
+      .catch(() => {});
+  });
+
+  const groups = $derived(hub.config.audio_group ?? []);
+  const group = $derived(target === 'group' ? groups.find((g) => g.name === tname) : undefined);
 
   const icon = $derived(KINDS.find((x) => x.k === kindOf(value))!.icon);
   const names = $derived.by(() => {
@@ -70,8 +126,16 @@
     switch (kind) {
       case 'cmd': return arg ? { cmd: arg } : undefined;
       case 'keys': return arg ? { keys: arg } : undefined;
-      case 'volume': return VOLUME.test(arg) ? { volume: arg } : undefined;
-      case 'mute': return { mute: (arg || 'toggle') as Mute };
+      case 'volume': {
+        if (!VOLUME.test(arg)) return undefined;
+        const t = targetKeys();
+        return { volume: t ? { level: arg, ...t } : arg };
+      }
+      case 'mute': {
+        const state = (arg || 'toggle') as Mute;
+        const t = targetKeys();
+        return { mute: t ? { state, ...t } : state };
+      }
       case 'next': return { page: 'next' };
       case 'prev': return { page: 'prev' };
       case 'page': return arg ? { page: arg } : undefined;
@@ -86,11 +150,65 @@
   function pick(k: Kind) {
     kind = k;
     if (k === 'page' || k === 'folder' || k === 'profile') arg = names[0] ?? '';
-    else if (k === 'volume') arg = '+2';
+    else if (k === 'volume') arg = fader ? '{value}' : '+2';
     else if (k === 'mute') arg = 'toggle';
     else if (k === 'session') arg = '0';
     else if (k !== 'cmd' && k !== 'keys') arg = '';
     onchange(build());
+  }
+
+  function pickTarget(t: TargetKind) {
+    target = t;
+    if (t === 'group') tname = groups[0]?.name ?? '';
+    else if (t === 'output-device') tname = audio.outputs[0] ?? '';
+    else if (t === 'input-device') tname = audio.inputs[0] ?? '';
+    else tname = '';
+    if (t === 'group' && !groups.length) return newGroup();
+    onchange(build());
+  }
+
+  function pickGroup(name: string) {
+    if (name === NEW_GROUP) return newGroup();
+    tname = name;
+    onchange(build());
+  }
+
+  function newGroup() {
+    ui.ask({
+      title: 'New app group',
+      body: 'One fader or key controls the volume of every app in the group, e.g. all your games.',
+      placeholder: 'Games',
+      ok: 'Create',
+      done: (name) => {
+        if (!name) return;
+        if (groups.some((g) => g.name === name)) return toast('A group with that name already exists');
+        // The group must exist before an action names it, or the service rejects the config.
+        edit((c) => (c.audio_group = [...(c.audio_group ?? []), { name }]));
+        target = 'group';
+        tname = name;
+        onchange(build());
+      },
+    });
+  }
+
+  function setGroupApps(text: string) {
+    const apps = text.split(',').map((s) => s.trim()).filter(Boolean);
+    edit((c) => {
+      const g = (c.audio_group ?? []).find((x) => x.name === tname);
+      if (g) g.apps = apps;
+    });
+  }
+
+  function addGroupApp(app: string) {
+    const apps = group?.apps ?? [];
+    if (!apps.some((a) => a.toLowerCase() === app.toLowerCase())) setGroupApps([...apps, app].join(', '));
+  }
+
+  function setGroupSteam(steam: boolean) {
+    edit((c) => {
+      const g = (c.audio_group ?? []).find((x) => x.name === tname);
+      if (g) g.steam = steam;
+    });
   }
 </script>
 
@@ -137,6 +255,62 @@
           <option value="on">Mute</option>
           <option value="off">Unmute</option>
         </select>
+      {/if}
+      {#if kind === 'volume' || kind === 'mute'}
+        <div class="sub-label">Controls</div>
+        <select class="select" value={target} onchange={(e) => pickTarget(e.currentTarget.value as TargetKind)}>
+          {#each TARGETS as { t, label }}<option value={t}>{label}</option>{/each}
+        </select>
+        {#if target === 'output-device' || target === 'input-device'}
+          {@const list = target === 'input-device' ? audio.inputs : audio.outputs}
+          <input
+            class="input"
+            value={tname}
+            list="{uid}-devices"
+            placeholder={target === 'input-device' ? 'USB Microphone' : 'Headphones'}
+            oninput={(e) => { tname = e.currentTarget.value; onchange(build()); }}
+          />
+          <datalist id="{uid}-devices">{#each list as d}<option value={d}></option>{/each}</datalist>
+          <p class="hint">Device name as your system shows it; * is a wildcard.</p>
+        {:else if target === 'app'}
+          <input
+            class="input mono"
+            value={tname}
+            list="{uid}-apps"
+            placeholder={WINDOWS ? 'Discord.exe' : 'discord'}
+            oninput={(e) => { tname = e.currentTarget.value; onchange(build()); }}
+          />
+          <datalist id="{uid}-apps">{#each audio.apps as a}<option value={a}></option>{/each}</datalist>
+          {#if audio.apps.length}
+            <div class="chips">
+              {#each audio.apps as a}<button class="chip" class:on={a.toLowerCase() === tname.toLowerCase()} onclick={() => { tname = a; onchange(build()); }}>{a}</button>{/each}
+            </div>
+          {/if}
+          <p class="hint">Program name, {WINDOWS ? '.exe optional' : 'as shown above while it plays'}; * is a wildcard. Apps that start later get the fader's level too.</p>
+        {:else if target === 'group'}
+          <select class="select" value={tname} onchange={(e) => pickGroup(e.currentTarget.value)}>
+            {#each groups as g}<option value={g.name}>{g.name}</option>{/each}
+            <option value={NEW_GROUP}>New group…</option>
+          </select>
+          {#if group}
+            <input
+              class="input mono"
+              value={(group.apps ?? []).join(', ')}
+              placeholder={WINDOWS ? 'cs2.exe, javaw.exe' : 'cs2, javaw'}
+              onchange={(e) => setGroupApps(e.currentTarget.value)}
+            />
+            {#if audio.apps.length}
+              <div class="chips">
+                {#each audio.apps as a}<button class="chip" onclick={() => addGroupApp(a)}>+ {a}</button>{/each}
+              </div>
+            {/if}
+            <label class="check">
+              <input type="checkbox" checked={!!group.steam} onchange={(e) => setGroupSteam(e.currentTarget.checked)} />
+              Everything Steam starts (games)
+            </label>
+            <p class="hint">Apps in “{group.name}”, separated by commas. Every action that uses the group follows these changes.</p>
+          {/if}
+        {/if}
       {:else if kind === 'session'}
         <select class="select" value={arg} onchange={(e) => { arg = e.currentTarget.value; onchange(build()); }}>
           {#each SLOTS as n}<option value={String(n)}>Session {n + 1}</option>{/each}
@@ -258,5 +432,44 @@
   .hint {
     font-size: 11.5px;
     color: var(--text-3);
+  }
+  .sub-label {
+    margin-top: 4px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text-2);
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .chip {
+    height: 22px;
+    padding: 0 8px;
+    font: inherit;
+    font-size: 11.5px;
+    color: var(--text-2);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    cursor: pointer;
+  }
+  .chip:hover {
+    color: var(--text);
+    border-color: var(--border-strong);
+  }
+  .chip.on {
+    color: var(--accent-text);
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-2);
+    cursor: pointer;
   }
 </style>
