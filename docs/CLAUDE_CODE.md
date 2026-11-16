@@ -70,8 +70,8 @@ brings a session up:
 
 - **Claude desktop app** sessions open in the app (`claude://code/continue?session=local_…`)
   and its window comes to the front.
-- **Terminal** sessions focus the window of the terminal `claude` runs in (Hyprland on Linux,
-  the foreground window on Windows). With several tabs, or tmux, in one terminal window, that
+- **Terminal** sessions focus the window of the terminal `claude` runs in (Hyprland or KDE Plasma on
+  Linux, the foreground window on Windows). With several tabs, or tmux, in one terminal window, that
   window comes up but not the tab.
 
 ```toml

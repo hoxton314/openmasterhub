@@ -25,8 +25,8 @@
 
 - **Every shipping module works:** Base, 15-key IPS keypad, 5 faders, 3 knobs, 2 rollers and the
   dial with its 240×240 screen, all verified on hardware.
-- **A profile per app.** The hub follows the focused window (Hyprland on Linux, the foreground
-  program on Windows) and switches keys, dial and knobs to match.
+- **A profile per app.** The hub follows the focused window (Hyprland or KDE Plasma on Linux,
+  the foreground program on Windows) and switches keys, dial and knobs to match.
 - **Live keys.** Clock, CPU/GPU load and temperature, RAM, volume and now playing with cover art,
   drawn right on the keys and the dial.
 - **Plain text config.** One TOML file you can keep in your dotfiles; the app and hand edits
@@ -65,6 +65,9 @@ faders set the volume or send their position (`{value}`) to a command.
 Give a profile the window classes (or `.exe` names on Windows) it is for, with `*` wildcards,
 and pick from the windows that are open right now. The first profile is the fallback when no
 listed app is focused.
+
+On KDE Plasma (6, Wayland or X11) `masterhubd` loads a small KWin script by itself, so there is
+nothing to install; the class is the window's `resourceClass` (`org.kde.konsole`, `firefox`).
 
 <table>
   <tr>
@@ -174,7 +177,7 @@ every option. The service reloads the file when it is edited by hand.
 |---|---|
 | `masterhub-proto` | Wire protocol: command encoding and input decoding, no I/O |
 | `masterhub-core` | Config model, Base slot layout, face/widget rendering, IPC protocol and client |
-| `masterhubd` | Background service: drives the hardware over hidraw, profiles/pages/folders, live widgets, per-app profiles (Hyprland on Linux, focused program on Windows), local IPC for the app |
+| `masterhubd` | Background service: drives the hardware over hidraw, profiles/pages/folders, live widgets, per-app profiles (Hyprland or KDE Plasma on Linux, focused program on Windows), local IPC for the app |
 | `app/` (`openmasterhub`) | Tauri desktop app (Svelte UI): live picture of your hub, click-to-configure editor |
 
 Protocol documentation: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) and `docs/protocol-*.md`.

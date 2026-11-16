@@ -62,7 +62,7 @@ identical while other platforms are added.
 ## Anytime
 
 - Action library: media controls without `playerctl`, per-app volume, OBS (websocket).
-- Focus tracking beyond Hyprland on Linux: KDE (KWin script), GNOME (extension), Sway (IPC).
+- Focus tracking beyond Hyprland and KDE on Linux: GNOME (extension), Sway (IPC).
 - Base tilt sensor: input `0x2B` reported once and then went silent; orientation currently comes
   from the config (`landscape` by default).
 - Confirm which physical roller is "left" when the roller module is rotated.

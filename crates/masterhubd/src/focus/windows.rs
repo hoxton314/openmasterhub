@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+use windows_sys::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
 use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -37,15 +38,32 @@ pub fn spawn(controller: Sender<Msg>) {
 
 /// File name of the program owning the foreground window, e.g. `obs64.exe`.
 fn foreground_exe() -> Option<String> {
-    // SAFETY: plain Win32 calls; the process handle is closed before returning and the buffer
-    // outlives the call that fills it.
-    unsafe {
+    // SAFETY: plain Win32 calls on the window handle just returned.
+    let pid = unsafe {
         let hwnd = GetForegroundWindow();
         if hwnd.is_null() {
             return None;
         }
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, &mut pid);
+        pid
+    };
+    exe_name(pid)
+}
+
+/// `.exe` names of the programs with a visible top-level window.
+pub fn window_classes() -> Result<Vec<String>> {
+    let mut pids: Vec<u32> = top_level_windows().into_iter().map(|(_, pid, _)| pid).collect();
+    pids.sort_unstable();
+    pids.dedup();
+    Ok(pids.into_iter().filter_map(exe_name).collect())
+}
+
+/// File name of a process's program, e.g. `obs64.exe`.
+fn exe_name(pid: u32) -> Option<String> {
+    // SAFETY: plain Win32 calls; the process handle is closed before returning and the buffer
+    // outlives the call that fills it.
+    unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if process.is_null() {
             return None;
@@ -85,14 +103,16 @@ pub fn raise(pid: u32, title: Option<&str>) -> Result<()> {
     bail!("no window found for process {pid} or its parents")
 }
 
-/// Visible, unowned, titled top-level windows with their process ids and titles, front to back.
+/// Visible (and not cloaked, like suspended UWP apps), unowned, titled top-level windows with their process ids and titles, front to back.
 fn top_level_windows() -> Vec<(HWND, u32, String)> {
     unsafe extern "system" fn collect(hwnd: HWND, out: LPARAM) -> i32 {
         // SAFETY: `out` is the Vec passed to EnumWindows below, alive for the whole call; the
         // title buffer outlives the call that fills it.
         unsafe {
             let len = GetWindowTextLengthW(hwnd);
-            if IsWindowVisible(hwnd) != 0 && GetWindow(hwnd, GW_OWNER).is_null() && len > 0 {
+            let mut cloaked = 0u32;
+            DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED as u32, &mut cloaked as *mut u32 as *mut _, 4);
+            if IsWindowVisible(hwnd) != 0 && cloaked == 0 && GetWindow(hwnd, GW_OWNER).is_null() && len > 0 {
                 let mut pid = 0u32;
                 GetWindowThreadProcessId(hwnd, &mut pid);
                 let mut buf = vec![0u16; len as usize + 1];

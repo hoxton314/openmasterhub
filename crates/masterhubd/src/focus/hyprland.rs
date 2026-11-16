@@ -28,7 +28,7 @@ pub fn spawn(controller: Sender<Msg>) {
                         }
                     }
                     None if !warned => {
-                        log::info!("Hyprland not detected; per-app profiles disabled until it appears");
+                        log::info!("Hyprland not detected; watching for it");
                         warned = true;
                     }
                     None => {}
@@ -37,6 +37,11 @@ pub fn spawn(controller: Sender<Msg>) {
             }
         })
         .expect("spawn hyprland thread");
+}
+
+/// Whether a Hyprland instance is running.
+pub fn running() -> bool {
+    instance_dir().is_some()
 }
 
 /// `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE`, or the newest instance directory
@@ -93,6 +98,13 @@ fn active_class(dir: &std::path::Path) -> Option<String> {
     v.get("class")?.as_str().map(str::to_owned)
 }
 
+/// Classes of all open windows (`j/clients`).
+pub fn window_classes() -> Result<Vec<String>> {
+    let dir = instance_dir().context("Hyprland is not running")?;
+    let clients: Vec<serde_json::Value> = serde_json::from_str(&request(&dir, "j/clients")?)?;
+    Ok(clients.iter().filter_map(|c| c.get("class")?.as_str().map(str::to_owned)).collect())
+}
+
 /// Focus the window of `pid`, or of its nearest ancestor that has one (the terminal a CLI
 /// runs in), switching workspace if needed. When that process has several windows, prefer the
 /// one whose title contains `title`, else the one focused last.
@@ -113,7 +125,7 @@ pub fn raise(pid: u32, title: Option<&str>) -> Result<()> {
             }
             return Ok(());
         }
-        p = match parent_pid(p) {
+        p = match super::parent_pid(p) {
             Some(pp) if pp > 1 => pp,
             _ => break,
         };
@@ -140,12 +152,6 @@ fn pick_window<'a>(clients: &'a [Client], pid: u32, title: Option<&str>) -> Opti
     title.and_then(|t| own.iter().find(|c| c.title.to_lowercase().contains(&t)).copied()).or(own.first().copied())
 }
 
-fn parent_pid(pid: u32) -> Option<u32> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    // "pid (comm) state ppid ...", where comm may itself contain parentheses.
-    stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,10 +172,5 @@ mod tests {
         assert_eq!(pick_window(&clients, 1, Some("nothing")).unwrap().address, "b");
         assert_eq!(pick_window(&clients, 1, None).unwrap().address, "b");
         assert!(pick_window(&clients, 3, None).is_none());
-    }
-
-    #[test]
-    fn finds_parent_process() {
-        assert_eq!(parent_pid(std::process::id()), Some(std::os::unix::process::parent_id()));
     }
 }

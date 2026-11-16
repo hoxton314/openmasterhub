@@ -16,6 +16,7 @@
 //! | `set_profile` | `name` | switch profile (until the focused app changes) |
 //! | `show_page` | `name` | show a keypad page or folder of the active profile |
 //! | `set_status` | `source`, `status`, `pid`, `background` | set (or clear, `status: null`) a tool's [`Status`] |
+//! | `get_open_apps` | | window classes (`.exe` names on Windows) of open windows, sorted |
 //!
 //! Events: `input`, `state`, `modules`, `display`, `config_changed`.
 
@@ -124,6 +125,7 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         background: bool,
     },
+    GetOpenApps,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -317,6 +319,9 @@ impl Client {
     pub fn show_page(&self, name: &str) -> Result<()> {
         self.call(Request::ShowPage { name: name.to_owned() }).map(|_| ())
     }
+    pub fn open_apps(&self) -> Result<Vec<String>> {
+        self.get(Request::GetOpenApps)
+    }
 }
 
 #[cfg(test)]
@@ -330,6 +335,8 @@ mod tests {
         let r = RequestMsg { id: 1, request: Request::GetState };
         assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"id":1,"method":"get_state"}"#);
         assert_eq!(serde_json::from_str::<RequestMsg>(r#"{"id":1,"method":"get_state"}"#).unwrap(), r);
+        let r = RequestMsg { id: 4, request: Request::GetOpenApps };
+        assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"id":4,"method":"get_open_apps"}"#);
 
         let r = RequestMsg {
             id: 2,

@@ -112,21 +112,14 @@ fn preview_face(state: State<AppState>, face: Face) -> Result<String, String> {
     Ok(data_url(&jpeg))
 }
 
-/// Window classes of open windows (Hyprland), suggested when assigning apps to a profile.
+/// Window classes (`.exe` names on Windows) of open windows, suggested when assigning apps to a
+/// profile. The service knows them on every desktop it follows.
 #[tauri::command]
-fn open_window_classes() -> Vec<String> {
-    let Ok(out) = std::process::Command::new("hyprctl").args(["clients", "-j"]).output() else { return Vec::new() };
-    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&out.stdout) else { return Vec::new() };
-    let mut classes: Vec<String> = v
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|c| c.get("class")?.as_str().map(str::to_owned))
-        .filter(|c| !c.is_empty() && c != masterhub_core::ipc::GUI_APP_ID && !c.starts_with("openmasterhub"))
-        .collect();
-    classes.sort();
-    classes.dedup();
-    classes
+fn open_window_classes(state: State<AppState>) -> Vec<String> {
+    state.client.open_apps().unwrap_or_else(|e| {
+        log::debug!("open windows: {e:#}");
+        Vec::new()
+    })
 }
 
 #[tauri::command]
