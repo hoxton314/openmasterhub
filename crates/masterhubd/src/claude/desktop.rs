@@ -5,8 +5,14 @@
 //!
 //! Not a documented format: every field is optional, and a file that does not parse just leaves
 //! its session out. Sessions on this machine are left out too; their hooks report them.
+//!
+//! A turn can end while background subagents keep running on the other machine. The app syncs
+//! the session's transcript here (`~/.claude/projects/ssh-<session id>/`), with a file per
+//! subagent, so a session stays working while an agent it launched in the background has not
+//! reported back.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -19,6 +25,9 @@ use super::SessionFile;
 const RECENT: Duration = Duration::from_secs(12 * 3600);
 /// A turn whose file has not changed for this long counts as over (the app quit mid-turn).
 const STALE_TURN: Duration = Duration::from_secs(3 * 3600);
+/// A background agent whose transcript has not changed for this long counts as gone (it never
+/// reported back: the remote `claude` crashed or the sync stopped).
+const STALE_AGENT: Duration = Duration::from_secs(3 * 3600);
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -70,15 +79,41 @@ pub struct RemoteSession {
 #[derive(Default)]
 pub struct DesktopSessions {
     files: HashMap<PathBuf, (SystemTime, Option<DesktopFile>)>,
+    /// What the synced transcripts say about background agents, by Claude Code session id.
+    transcripts: HashMap<String, Transcript>,
 }
 
 impl DesktopSessions {
-    /// Open remote sessions, working while a turn runs in them or in a session they started.
+    /// Open remote sessions, working while a turn runs in them or in a session they started,
+    /// or while an agent they launched in the background is still running.
     pub fn remote(&mut self) -> Vec<RemoteSession> {
         let Some(dir) = sessions_dir() else { return Vec::new() };
         self.scan(&dir);
         let now = SystemTime::now();
-        sessions(self.files.values().filter_map(|(m, f)| Some((*m, f.as_ref()?))), now)
+        let mut v = sessions(self.files.values().filter_map(|(m, f)| Some((*m, f.as_ref()?))), now);
+        for s in &mut v {
+            if s.status == Status::Ready && s.file.session_id.as_deref().is_some_and(|cli| self.agents_running(cli, now)) {
+                s.status = Status::Working;
+            }
+        }
+        self.transcripts.retain(|cli, _| v.iter().any(|s| s.file.session_id.as_deref() == Some(cli)));
+        v
+    }
+
+    /// Whether a background agent of session `cli` is still running, from the transcript the
+    /// app syncs here.
+    fn agents_running(&mut self, cli: &str, now: SystemTime) -> bool {
+        // The id ends up in a path.
+        if cli.is_empty() || !cli.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return false;
+        }
+        let Some(dir) = super::claude_dir().map(|d| d.join("projects").join(format!("ssh-{cli}"))) else { return false };
+        let t = self.transcripts.entry(cli.to_owned()).or_default();
+        t.update(&dir.join(format!("{cli}.jsonl")));
+        t.running().any(|id| {
+            let modified = std::fs::metadata(dir.join(format!("agent-{id}.jsonl"))).and_then(|m| m.modified());
+            modified.is_ok_and(|m| now.duration_since(m).map_or(true, |age| age < STALE_AGENT))
+        })
     }
 
     fn scan(&mut self, dir: &Path) {
@@ -93,6 +128,70 @@ impl DesktopSessions {
         }
         self.files.retain(|p, _| seen.contains(p));
     }
+}
+
+/// Background agents a session launched and those that reported back, read from its transcript
+/// as it grows.
+#[derive(Debug, Default)]
+struct Transcript {
+    /// Bytes read so far, up to the end of the last whole line.
+    read: u64,
+    launched: HashSet<String>,
+    finished: HashSet<String>,
+}
+
+impl Transcript {
+    /// Read the lines added to the transcript at `path` since the last call.
+    fn update(&mut self, path: &Path) {
+        let Ok(mut f) = std::fs::File::open(path) else { return };
+        let Ok(len) = f.metadata().map(|m| m.len()) else { return };
+        if len < self.read {
+            // Rewritten: start over.
+            *self = Self::default();
+        }
+        if len == self.read || f.seek(SeekFrom::Start(self.read)).is_err() {
+            return;
+        }
+        let mut buf = Vec::new();
+        if f.take(len - self.read).read_to_end(&mut buf).is_err() {
+            return;
+        }
+        let Some(end) = buf.iter().rposition(|&b| b == b'\n') else { return };
+        for line in buf[..end].split(|&b| b == b'\n') {
+            if let Ok(line) = std::str::from_utf8(line) {
+                self.line(line);
+            }
+        }
+        self.read += end as u64 + 1;
+    }
+
+    /// Note a background agent launched (the Agent tool's result) or reporting back (a
+    /// `<task-notification>` queued for the main agent). Quotes are matched unescaped, so the
+    /// same text inside a message or tool output does not count.
+    fn line(&mut self, line: &str) {
+        if let Some(i) = line.find(r#""text":"Async agent launched"#)
+            && let Some(id) = after(&line[i..], "agentId: ")
+        {
+            self.launched.insert(id.to_owned());
+        } else if line.starts_with(r#"{"type":"queue-operation","operation":"enqueue""#)
+            && line.contains("<task-notification>")
+            && let Some(id) = after(line, "<task-id>")
+        {
+            self.finished.insert(id.to_owned());
+        }
+    }
+
+    /// Agents launched in the background that have not reported back yet.
+    fn running(&self) -> impl Iterator<Item = &str> {
+        self.launched.difference(&self.finished).map(String::as_str)
+    }
+}
+
+/// The id that follows `prefix` in `text`.
+fn after<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let rest = &text[text.find(prefix)? + prefix.len()..];
+    let id = &rest[..rest.find(|c: char| !c.is_ascii_alphanumeric()).unwrap_or(rest.len())];
+    (!id.is_empty()).then_some(id)
 }
 
 /// `local_*.json` two folders below `dir` (account, then organisation).
@@ -236,6 +335,41 @@ mod tests {
         assert_eq!(s.file.title().as_deref(), Some("Vault"));
         assert_eq!(s.file.desktop_link().as_deref(), Some("claude://code/continue?session=local_abc-1"));
         assert_eq!(s.file.pid, None);
+    }
+
+    /// Lines as Claude Code writes them, shortened.
+    const LAUNCH: &str = r#"{"parentUuid":"p","isSidechain":false,"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_1","type":"tool_result","content":[{"type":"text","text":"Async agent launched successfully. (internal)\nagentId: a8ee2d055bc747ee8 (internal ID)\nThe agent is working in the background."}]}]}}"#;
+    const DONE: &str = r#"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-16T14:49:26.288Z","sessionId":"s","content":"<task-notification>\n<task-id>a8ee2d055bc747ee8</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n<status>completed</status>\n</task-notification>"}"#;
+    /// The same text quoted in a tool result (grep output, say) is not a launch.
+    const QUOTED: &str = r#"{"parentUuid":"q","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_2","type":"tool_result","content":"{\"type\":\"text\",\"text\":\"Async agent launched successfully. agentId: bbbb1111 \"} {\"type\":\"queue-operation\",\"operation\":\"enqueue\"} <task-notification><task-id>a8ee2d055bc747ee8</task-id>"}]}}"#;
+
+    #[test]
+    fn background_agents_run_until_they_report_back() {
+        let mut t = Transcript::default();
+        t.line(LAUNCH);
+        assert_eq!(t.running().collect::<Vec<_>>(), ["a8ee2d055bc747ee8"]);
+        t.line(QUOTED);
+        assert_eq!(t.running().collect::<Vec<_>>(), ["a8ee2d055bc747ee8"]);
+        t.line(DONE);
+        assert_eq!(t.running().count(), 0);
+    }
+
+    #[test]
+    fn reads_the_transcript_as_it_grows() {
+        let path = std::env::temp_dir().join(format!("omh-transcript-{}.jsonl", std::process::id()));
+        let mut t = Transcript::default();
+        // A line still being written is read once it is whole.
+        std::fs::write(&path, format!("{LAUNCH}\n{}", &DONE[..40])).unwrap();
+        t.update(&path);
+        assert_eq!(t.running().count(), 1);
+        std::fs::write(&path, format!("{LAUNCH}\n{DONE}\n")).unwrap();
+        t.update(&path);
+        assert_eq!(t.running().count(), 0);
+        // Rewritten shorter: read again from the start.
+        std::fs::write(&path, format!("{LAUNCH}\n")).unwrap();
+        t.update(&path);
+        assert_eq!(t.running().count(), 1);
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[test]

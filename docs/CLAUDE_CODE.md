@@ -26,12 +26,16 @@ Windows), which say when a turn starts and ends:
 - It is **working** during a turn, and while a session it started (a side session) is still in
   a turn; otherwise **ready**. A turn whose file hasn't changed for 3 hours counts as over (the
   app quit in the middle of it).
+- It also stays **working** after a turn while a subagent it launched in the background is still
+  running. The app keeps a copy of the session's transcript here (`~/.claude/projects/ssh-<session id>/`),
+  and an agent counts until its completion notice shows up there. An agent whose transcript
+  hasn't changed for 3 hours counts as gone.
 - The files don't record permission prompts or questions, so a remote session never shows
   **attention**.
 - Pressing its key opens it in the desktop app.
 
 These files are the desktop app's internal format, not a documented API: if an update changes
-them, remote sessions just stop appearing.
+them, remote sessions just stop appearing (or stop showing their background agents).
 
 ## Set up
 
