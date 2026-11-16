@@ -126,6 +126,7 @@ fn main() -> Result<()> {
             .context("spawning controller")?;
     }
     focus::spawn(ctl_tx.clone());
+    audio::spawn_watcher();
 
     log::info!("masterhubd started, config {}", path.display());
     let mut workers: HashMap<String, JoinHandle<()>> = HashMap::new();

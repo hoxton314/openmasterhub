@@ -10,6 +10,13 @@
 #   { volume = "+2" }               default output volume: "+2"/"-2" change it, "40" sets
 #                                   it, "{value}" follows a fader
 #   { mute = "toggle" }             mute the default output: toggle, on, off
+#   { volume = { level = "{value}", app = "discord" } }
+#   { mute = { state = "toggle", input = "default" } }
+#                                   volume or mute of something else, one of:
+#                                   output = "default" | "<device>"   input = "default" | "<device>"
+#                                   app = "<program>"   group = "<audio group>"
+#                                   (devices by name or description, apps by program or app
+#                                   name, .exe optional; case-insensitive, * wildcards)
 #   { page = "next" | "prev" | "<page name>" }
 #   { folder = "<folder name>" }    open a keypad folder
 #   { back = true }                 leave the folder (outside a folder: back to the profile
@@ -23,6 +30,14 @@
 #   On Windows, cpu_temp (and the GPU widgets without an NVIDIA driver) read
 #   LibreHardwareMonitor while it runs.
 # Images: PNG/JPEG, or GIF (animated).
+#
+# Audio groups: apps that one volume or mute action controls together. `steam = true` adds
+# everything Steam starts (games, Proton). Apps that start playing later get the group's level.
+#
+#   [[audio_group]]
+#   name = "Games"
+#   apps = ["minecraft*", "javaw"]
+#   steam = true
 #
 # The first profile is the default. Other profiles activate when the focused window's class
 # matches one of their `apps` (Hyprland window class, or the .exe name on Windows;

@@ -36,6 +36,9 @@ pub struct Config {
     /// focused application.
     #[serde(default, rename = "profile", skip_serializing_if = "Vec::is_empty")]
     pub profiles: Vec<Profile>,
+    /// Named sets of apps that one `volume` or `mute` action controls together.
+    #[serde(default, rename = "audio_group", skip_serializing_if = "Vec::is_empty")]
+    pub audio_groups: Vec<AudioGroup>,
 }
 
 impl Default for Config {
@@ -49,6 +52,7 @@ impl Default for Config {
             upright: true,
             pinned: Vec::new(),
             profiles: Vec::new(),
+            audio_groups: Vec::new(),
         }
     }
 }
@@ -410,11 +414,12 @@ pub enum Action {
     Back(bool),
     /// Switch to a profile by name.
     Profile(String),
-    /// Output volume of the default device: `"+2"`/`"-2"` change it by percentage points,
-    /// `"40"` sets it, `"{value}"` follows a fader.
-    Volume(String),
-    /// Mute the default output device: `toggle`, `on` or `off`.
-    Mute(Mute),
+    /// Volume: `"+2"`/`"-2"` change it by percentage points, `"40"` sets it, `"{value}"`
+    /// follows a fader. Of the default output, or of `{ level, output | input | app | group }`.
+    Volume(VolumeAction),
+    /// Mute: `toggle`, `on` or `off`. Of the default output, or of
+    /// `{ state, output | input | app | group }`.
+    Mute(MuteAction),
     /// Bring up the Claude Code session in this slot (see `Widget::ClaudeSession`).
     Session(u8),
 }
@@ -425,6 +430,165 @@ pub enum Mute {
     Toggle,
     On,
     Off,
+}
+
+/// What a `volume` or `mute` action applies to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum AudioTarget {
+    /// The default output device.
+    #[default]
+    Output,
+    /// An output device by name or description (case-insensitive, `*` wildcards).
+    OutputDevice(String),
+    /// The default input device (microphone).
+    Input,
+    /// An input device by name or description (case-insensitive, `*` wildcards).
+    InputDevice(String),
+    /// Apps playing audio, by program or app name (case-insensitive, `*` wildcards, `.exe`
+    /// optional), e.g. `"discord"`.
+    App(String),
+    /// A named `[[audio_group]]`.
+    Group(String),
+}
+
+/// A `volume` action: the change (`"+2"`, `"40"`, `"{value}"`) and what it applies to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "VolumeRepr", into = "VolumeRepr")]
+pub struct VolumeAction {
+    pub level: String,
+    pub target: AudioTarget,
+}
+
+/// A `mute` action: the new state and what it applies to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "MuteRepr", into = "MuteRepr")]
+pub struct MuteAction {
+    pub state: Mute,
+    pub target: AudioTarget,
+}
+
+impl From<&str> for VolumeAction {
+    fn from(level: &str) -> Self {
+        Self { level: level.to_owned(), target: AudioTarget::Output }
+    }
+}
+
+impl From<Mute> for MuteAction {
+    fn from(state: Mute) -> Self {
+        Self { state, target: AudioTarget::Output }
+    }
+}
+
+/// The target keys of a volume or mute table; exactly one may be set.
+#[derive(Debug, Clone, Default)]
+struct TargetKeys {
+    output: Option<String>,
+    input: Option<String>,
+    app: Option<String>,
+    group: Option<String>,
+}
+
+impl TryFrom<TargetKeys> for AudioTarget {
+    type Error = String;
+    fn try_from(t: TargetKeys) -> Result<Self, String> {
+        let device = |d: String, default, named: fn(String) -> AudioTarget| {
+            if d.is_empty() || d.eq_ignore_ascii_case("default") { default } else { named(d) }
+        };
+        let mut targets = [
+            t.output.map(|d| device(d, AudioTarget::Output, AudioTarget::OutputDevice)),
+            t.input.map(|d| device(d, AudioTarget::Input, AudioTarget::InputDevice)),
+            t.app.map(AudioTarget::App),
+            t.group.map(AudioTarget::Group),
+        ]
+        .into_iter()
+        .flatten();
+        let target = targets.next().unwrap_or_default();
+        if targets.next().is_some() {
+            return Err("use only one of output, input, app and group".into());
+        }
+        Ok(target)
+    }
+}
+
+impl From<AudioTarget> for TargetKeys {
+    fn from(t: AudioTarget) -> Self {
+        let mut k = Self::default();
+        match t {
+            AudioTarget::Output => k.output = Some("default".into()),
+            AudioTarget::OutputDevice(d) => k.output = Some(d),
+            AudioTarget::Input => k.input = Some("default".into()),
+            AudioTarget::InputDevice(d) => k.input = Some(d),
+            AudioTarget::App(a) => k.app = Some(a),
+            AudioTarget::Group(g) => k.group = Some(g),
+        }
+        k
+    }
+}
+
+/// TOML/JSON shapes of volume and mute actions: the bare value for the default output, else
+/// a table with the value and one target key.
+macro_rules! target_repr {
+    ($repr:ident, $table:ident, $action:ident, $field:ident: $ty:ty) => {
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        #[serde(untagged)]
+        enum $repr {
+            Short($ty),
+            Long($table),
+        }
+
+        #[derive(Debug, Clone, Serialize, Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct $table {
+            $field: $ty,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            output: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            input: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            app: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            group: Option<String>,
+        }
+
+        impl TryFrom<$repr> for $action {
+            type Error = String;
+            fn try_from(r: $repr) -> Result<Self, String> {
+                Ok(match r {
+                    $repr::Short($field) => Self { $field, target: AudioTarget::Output },
+                    $repr::Long(t) => {
+                        let keys = TargetKeys { output: t.output, input: t.input, app: t.app, group: t.group };
+                        Self { $field: t.$field, target: keys.try_into()? }
+                    }
+                })
+            }
+        }
+
+        impl From<$action> for $repr {
+            fn from(a: $action) -> Self {
+                if a.target == AudioTarget::Output {
+                    return Self::Short(a.$field);
+                }
+                let k = TargetKeys::from(a.target);
+                Self::Long($table { $field: a.$field, output: k.output, input: k.input, app: k.app, group: k.group })
+            }
+        }
+    };
+}
+
+target_repr!(VolumeRepr, VolumeTable, VolumeAction, level: String);
+target_repr!(MuteRepr, MuteTable, MuteAction, state: Mute);
+
+/// Apps whose volume one fader or knob controls together, e.g. all games.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioGroup {
+    pub name: String,
+    /// Program or app names, as for `app` targets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<String>,
+    /// Also every program started by Steam (games and Proton).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub steam: bool,
 }
 
 /// A parsed `volume` action.
@@ -574,11 +738,17 @@ impl Config {
                     {
                         bail!("{}: page {pg:?} does not exist", p.name)
                     }
-                    Action::Volume(v) if VolumeChange::parse(v, None).is_none() => {
-                        bail!("{}: volume {v:?} must be like \"+2\", \"-2\", \"40\" or \"{{value}}\"", p.name)
+                    Action::Volume(v) if VolumeChange::parse(&v.level, None).is_none() => {
+                        bail!("{}: volume {:?} must be like \"+2\", \"-2\", \"40\" or \"{{value}}\"", p.name, v.level)
                     }
                     _ => {}
                 }
+            }
+        }
+        let mut groups = std::collections::HashSet::new();
+        for g in &self.audio_groups {
+            if !groups.insert(g.name.as_str()) {
+                bail!("audio group {:?} defined twice", g.name);
             }
         }
         let mut pinned = std::collections::HashSet::new();
@@ -604,6 +774,16 @@ impl Config {
                 && !self.profiles.iter().any(|p| &p.name == name)
             {
                 bail!("profile {name:?} does not exist");
+            }
+            let target = match action {
+                Action::Volume(v) => &v.target,
+                Action::Mute(m) => &m.target,
+                _ => continue,
+            };
+            if let AudioTarget::Group(g) = target
+                && !groups.contains(g.as_str())
+            {
+                bail!("audio group {g:?} does not exist");
             }
         }
         Ok(())
@@ -756,7 +936,7 @@ mod tests {
     #[test]
     fn starter_config_parses() {
         let cfg = Config::parse(include_str!("../../../examples/starter.toml"), Path::new("/x")).unwrap();
-        assert_eq!(cfg.profiles[0].dial.as_ref().unwrap().press, Some(Action::Mute(Mute::Toggle)));
+        assert_eq!(cfg.profiles[0].dial.as_ref().unwrap().press, Some(Action::Mute(Mute::Toggle.into())));
     }
 
     #[test]
@@ -787,5 +967,66 @@ mod tests {
         };
         assert_eq!(cfg.profile_for_app("obs"), 1);
         assert_eq!(cfg.profile_for_app("kitty"), 0);
+    }
+
+    #[test]
+    fn audio_targets() {
+        let text = r#"
+            [[audio_group]]
+            name = "Games"
+            apps = ["cs2"]
+            steam = true
+
+            [[profile]]
+            name = "Default"
+            [[profile.fader]]
+            index = 0
+            change = { volume = "{value}" }
+            [[profile.fader]]
+            index = 1
+            change = { volume = { level = "{value}", app = "discord" } }
+            [[profile.fader]]
+            index = 2
+            change = { volume = { level = "{value}", group = "Games" } }
+            [[profile.fader]]
+            index = 3
+            change = { volume = { level = "{value}", input = "default" } }
+            [[profile.fader]]
+            index = 4
+            change = { volume = { level = "{value}", output = "*headphones*" } }
+            [[profile.knob]]
+            index = 0
+            press = { mute = { state = "toggle", input = "Blue Yeti" } }
+        "#;
+        let cfg = Config::parse(text, Path::new("/x")).unwrap();
+        let p = &cfg.profiles[0];
+        let target = |i: usize| match &p.faders[i].change {
+            Some(Action::Volume(v)) => v.target.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(target(0), AudioTarget::Output);
+        assert_eq!(target(1), AudioTarget::App("discord".into()));
+        assert_eq!(target(2), AudioTarget::Group("Games".into()));
+        assert_eq!(target(3), AudioTarget::Input);
+        assert_eq!(target(4), AudioTarget::OutputDevice("*headphones*".into()));
+        assert_eq!(
+            p.knobs[0].press,
+            Some(Action::Mute(MuteAction { state: Mute::Toggle, target: AudioTarget::InputDevice("Blue Yeti".into()) }))
+        );
+        assert!(cfg.audio_groups[0].steam);
+
+        let toml = cfg.to_toml().unwrap();
+        assert!(toml.contains(r#"volume = "{value}""#), "{toml}");
+        assert!(toml.contains(r#"state = "toggle""#), "{toml}");
+        assert_eq!(Config::parse(&toml, Path::new("/x")).unwrap(), cfg);
+
+        let json = serde_json::to_string(&p.faders[1].change).unwrap();
+        assert_eq!(json, r#"{"volume":{"level":"{value}","app":"discord"}}"#);
+
+        let bad = |change: &str| Config::parse(&format!("[[profile]]\nname = \"a\"\n[[profile.fader]]\nindex = 0\nchange = {change}\n"), Path::new("/x"));
+        assert!(bad(r#"{ volume = { level = "1", app = "a", group = "b" } }"#).is_err());
+        assert!(bad(r#"{ volume = { level = "1", group = "nope" } }"#).is_err());
+        assert!(bad(r#"{ volume = { level = "loud", app = "a" } }"#).is_err());
+        assert!(bad(r#"{ volume = { level = "1", device = "a" } }"#).is_err());
     }
 }

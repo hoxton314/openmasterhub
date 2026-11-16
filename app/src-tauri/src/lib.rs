@@ -122,6 +122,15 @@ fn open_window_classes(state: State<AppState>) -> Vec<String> {
     })
 }
 
+/// Apps playing audio and the audio devices, suggested as targets of volume and mute actions.
+#[tauri::command]
+fn audio_info(state: State<AppState>) -> masterhub_core::ipc::AudioInfo {
+    state.client.audio().unwrap_or_else(|e| {
+        log::debug!("audio info: {e:#}");
+        Default::default()
+    })
+}
+
 #[tauri::command]
 fn start_service() -> Result<(), String> {
     launch_service().map_err(err)
@@ -264,6 +273,7 @@ pub fn run() {
             show_page,
             preview_face,
             open_window_classes,
+            audio_info,
             start_service,
             restart_service
         ])

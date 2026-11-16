@@ -139,7 +139,7 @@
         {@const i = s.index}
         <div class="group first">
           <div class="group-title">Trigger</div>
-          <ActionEditor title="Move" value={profile?.fader?.find((x) => x.index === i)?.change} onchange={(a) => edit((c) => (faderMut(c, i).change = a))} />
+          <ActionEditor title="Move" fader value={profile?.fader?.find((x) => x.index === i)?.change} onchange={(a) => edit((c) => (faderMut(c, i).change = a))} />
           <p class="hint">Runs on every movement; <code>{'{value}'}</code> becomes the position, 0 to 100.</p>
         </div>
         <div class="group">

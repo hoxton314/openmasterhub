@@ -46,6 +46,8 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
       return preview(args?.face as Face);
     case 'open_window_classes':
       return ['firefox', 'com.mitchellh.ghostty', 'obs', 'steam', 'code-oss'];
+    case 'audio_info':
+      return { apps: ['Discord', 'firefox', 'spotify'], outputs: ['Speakers', 'Headphones'], inputs: ['USB Microphone', 'Webcam'] };
     default:
       return;
   }

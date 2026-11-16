@@ -151,5 +151,6 @@ fn handle(request: Request, controller: &Sender<Msg>, snapshot: &Mutex<Snapshot>
             json(())
         }
         Request::GetOpenApps => json(crate::focus::open_apps()?),
+        Request::GetAudio => json(crate::audio::info()),
     }
 }

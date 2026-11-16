@@ -889,7 +889,12 @@ impl Controller {
                 }
                 let coalesce = (control == "fader").then(|| format!("{serial}/fader{index}"));
                 if !self.navigate(&action) {
-                    let _ = self.actions.send(Request { action, value, coalesce });
+                    let audio = match &action {
+                        Action::Volume(v) => crate::audio::Target::resolve(&v.target, &self.config.audio_groups),
+                        Action::Mute(m) => crate::audio::Target::resolve(&m.target, &self.config.audio_groups),
+                        _ => None,
+                    };
+                    let _ = self.actions.send(Request { action, value, coalesce, audio });
                 }
             }
         }

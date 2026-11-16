@@ -2,7 +2,7 @@
 // Edits go through `edit()`, which saves to the service shortly after the last change.
 
 import { invoke, listen } from './backend';
-import type { Action, Config, Display, HubState, InputMsg, KeyConfig, ModuleState, Page, Profile, Selection, Snapshot, Side } from './types';
+import type { Action, AudioTarget, Config, Display, HubState, InputMsg, KeyConfig, ModuleState, Page, Profile, Selection, Snapshot, Side } from './types';
 
 export const hub = $state({
   online: false,
@@ -197,12 +197,29 @@ export function describe(a: Action | undefined): string {
   if ('folder' in a) return `Open folder “${a.folder}”`;
   if ('back' in a) return 'Leave folder';
   if ('volume' in a) {
-    if (a.volume === '{value}') return 'Volume: follow the fader';
-    return /^[+-]/.test(a.volume) ? `Volume ${a.volume}%` : `Volume: set to ${a.volume}%`;
+    const v = typeof a.volume === 'string' ? { level: a.volume } : a.volume;
+    const what = audioTargetName(v);
+    const name = what ? `${what} volume` : 'Volume';
+    if (v.level === '{value}') return `${name}: follow the fader`;
+    return /^[+-]/.test(v.level) ? `${name} ${v.level}%` : `${name}: set to ${v.level}%`;
   }
-  if ('mute' in a) return a.mute === 'toggle' ? 'Mute: toggle' : a.mute === 'on' ? 'Mute' : 'Unmute';
+  if ('mute' in a) {
+    const m = typeof a.mute === 'string' ? { state: a.mute } : a.mute;
+    const what = audioTargetName(m);
+    const verb = m.state === 'toggle' ? 'Mute' : m.state === 'on' ? 'Mute' : 'Unmute';
+    return `${verb}${what ? ` ${what}` : ''}${m.state === 'toggle' ? ': toggle' : ''}`;
+  }
   if ('session' in a) return `Open Claude session ${a.session + 1}`;
   return `Switch to profile “${a.profile}”`;
+}
+
+/** What a volume or mute action controls, for summaries; empty for the default output. */
+export function audioTargetName(t: AudioTarget): string {
+  const device = (d: string | undefined, fallback: string) => (!d || d === 'default' ? fallback : d);
+  if (t.input !== undefined) return device(t.input, 'Microphone');
+  if (t.app) return t.app;
+  if (t.group) return `“${t.group}”`;
+  return device(t.output, '');
 }
 
 /** Effective LED colour of a module's LED (profile override over global). */

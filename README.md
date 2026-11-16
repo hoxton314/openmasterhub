@@ -45,7 +45,8 @@ Click a key to set its label, colours, icon (PNG, JPEG or animated GIF) or live 
 it does on press and release:
 
 - **Keys** sends shortcuts and media keys (`ctrl+shift+t`, `playpause`, `f13`).
-- **Volume** and **Mute** change the default output device, on Linux and Windows alike.
+- **Volume** and **Mute** change the default output, another output, a microphone, one app
+  (Discord, Spotify) or a group of apps (all your games), on Linux and Windows alike.
 - **Command** runs anything: scripts, `playerctl`, `hyprctl`, `cmd` on Windows.
 - **Page**, **Folder**, **Back** and **Profile** move around your own layouts, so 15 keys can
   hold as many actions as you need.
@@ -56,7 +57,8 @@ it does on press and release:
 
 The dial has its own round screen with any widget or image, and actions for turning left, turning right and pressing.
 Each knob has a turn and a press action and its own ring colour, rollers scroll or zoom, and
-faders set the volume or send their position (`{value}`) to a command.
+faders set the volume or send their position (`{value}`) to a command. Five faders make a
+mixer: master, Discord, Spotify, a "Games" group and the microphone.
 
 ### Profiles that follow your focus
 
@@ -153,7 +155,8 @@ install -Dm644 dist/org.openmasterhub.OpenMasterHub.desktop ~/.local/share/appli
 ```
 
 Virtual key presses use `/dev/uinput`, which the logged-in user can normally access. Volume
-widgets use `wpctl` (PipeWire) and GPU widgets use NVML (NVIDIA) or sysfs (AMD).
+actions and widgets talk to PipeWire (`pipewire-pulse`) or PulseAudio directly, and GPU widgets
+use NVML (NVIDIA) or sysfs (AMD).
 
 ## Developing the app
 
