@@ -95,7 +95,12 @@ Detailed specs:
 - `0` means one click rolled away from the user (toward the keys), `1` one click toward the user, and `0xff` no movement.
 - It sends one report per click.
 
-**Base (`01f6`):** input `01 2b 01 00 01` (orientation, 1 = horizontal), sent repeatedly about every 0.5 s.
+**Base (`01f6`):** input `01 2b 01 00 01` (orientation, 1 = horizontal).
+- On firmware 02.00.04.00 it is sent only on some changes, never while the Base is stationary, and
+  not at all while it lies flat (a gravity sensor has nothing to measure then). There is no reading
+  at startup, and feature `0x35` returns an empty payload, so it cannot be polled either.
+- Whether `1` means "long edge down" when the Base is propped up is unconfirmed; one report (issue 13)
+  saw `1` with the Base standing upright.
 
 **M0 firmware info** (feature `0x2D` = bootloader, `0x2E`/`0x2F` = application): `[id 0f crc:4 "vv.vv.vv.vv"]`.
 - Base: 02.00.04.00

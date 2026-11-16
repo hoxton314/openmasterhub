@@ -288,9 +288,10 @@ The device sends a report whenever any fader moves, and each report carries all 
 
 | byte | meaning |
 |------|---------|
-| `data[0]` | orientation: `1` = horizontal, anything else = vertical |
+| `data[0]` | orientation: `1` = horizontal, anything else = vertical (which physical edge is down is unconfirmed) |
 
-The Base has no key events in this SDK.
+The Base has no key events in this SDK. On firmware 02.00.04.00 the event is sent only on some
+orientation changes and never while the Base lies flat; it is not repeated periodically.
 
 ## 5. Feature reports (GET only)
 
@@ -304,7 +305,7 @@ The Base has no key events in this SDK.
 | `0x32` | `Get_LED_Brightness` | `[1]` = len, `[2..]` up to 5 bytes, presumably per-LED brightness | Base, Fader | H layout / M meaning |
 | `0x33` | `Get_Slider_Value` | `[1]` = len (5), `[2..6]` fader 0..4 positions, 0..100 | Fader | H / M |
 | `0x34` | `Get_LED_Mode` | `[1]` = len, `[2..]` up to 5 bytes, presumably per-LED mode | Base, Fader | H / M |
-| `0x35` | `Get_Device_Direction` | `[2]` = orientation (`1` = horizontal, presumably) | Base | H / M |
+| `0x35` | `Get_Device_Direction` | `[2]` = orientation (`1` = horizontal, presumably); returns an empty payload on firmware 02.00.04.00 | Base | H / L |
 | `0x36` | `Get_Config_Info` | `[1]` = len, `[2..]` up to 16 bytes, unknown | all M0 | H / L |
 
 Firmware info details [H]:

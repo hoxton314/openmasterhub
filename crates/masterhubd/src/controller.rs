@@ -142,6 +142,13 @@ impl Controller {
             s.config_text = config_text;
             s.config_path = config_path.clone();
         }
+        if config.orientation.is_auto() {
+            // The sensor only reports some changes and nothing while the Base lies flat.
+            log::info!(
+                "orientation = \"auto\": no tilt sensor reading yet, assuming landscape \
+                 (set orientation in the config to pin it)"
+            );
+        }
         let c = Self {
             renderer: Renderer::new(config.font.as_deref()),
             config_mtime: mtime(&config_path),
