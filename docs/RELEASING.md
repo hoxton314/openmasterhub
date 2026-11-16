@@ -34,6 +34,19 @@ Nothing is published before a manual approval.
 If the build fails, fix it, delete the tag and draft release, and tag again. Nothing reaches
 the AUR or the public release page before the approval.
 
+## Pre-releases
+
+A version with a suffix (`0.7.0-beta.1`, `0.7.0-rc.2`) goes through the same steps, so bump
+`Cargo.toml` to it and push the tag `v0.7.0-beta.1`. The workflow then:
+
+- marks the GitHub release as a **pre-release** and does not make it the latest, so the
+  release page and links to the latest release keep pointing at the last stable version;
+- builds the Linux tarball and the Windows installer as usual;
+- skips the AUR package (makepkg does not allow `-` in `pkgver`, and AUR users should only get
+  stable releases).
+
+The publish job still waits for the `aur` approval before the pre-release becomes public.
+
 ## One-time setup
 
 - Environment `aur` (Settings → Environments) with **Required reviewers** set to the

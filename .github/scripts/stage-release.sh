@@ -5,7 +5,8 @@
 #   stage-release.sh VERSION TARGET_DIR OUT_DIR
 #
 # TARGET_DIR is cargo's target directory (binaries in TARGET_DIR/release). OUT_DIR receives
-# openmasterhub-VERSION-x86_64.tar.gz and aur/ (PKGBUILD, .SRCINFO, openmasterhub.install).
+# openmasterhub-VERSION-x86_64.tar.gz and aur/ (PKGBUILD, .SRCINFO, openmasterhub.install),
+# the latter only for releases, not pre-releases.
 set -euo pipefail
 
 version=${1:?version}
@@ -37,6 +38,12 @@ for size in 32 64 128 256 512; do
 done
 tar -C "$out" -czf "$out/$name.tar.gz" "$name"
 sum=$(sha256sum "$out/$name.tar.gz" | cut -d' ' -f1)
+
+# Pre-releases (`0.7.0-beta.1`) get no AUR package: makepkg rejects `-` in pkgver.
+if [[ $version == *-* ]]; then
+  echo "staged $out/$name.tar.gz ($sum), no AUR files for a pre-release"
+  exit 0
+fi
 
 cp "$root/aur/openmasterhub-bin/PKGBUILD" "$root/aur/openmasterhub-bin/openmasterhub.install" "$out/aur/"
 sed -i \

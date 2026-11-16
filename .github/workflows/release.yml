@@ -8,6 +8,8 @@ name: Release
 #   3. `publish` waits for manual approval (environment `aur`), then publishes the GitHub
 #      release and pushes the PKGBUILD to the AUR. Releasing to the AUR only after the draft
 #      is public matters: draft assets cannot be downloaded by makepkg.
+# A pre-release tag (`vX.Y.Z-beta.1`, anything with a `-`) gets a GitHub pre-release only: not
+# marked latest, and no AUR package (makepkg rejects `-` in pkgver, and AUR users would get it).
 # See docs/RELEASING.md.
 
 on:
@@ -26,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
 
     steps:
       - uses: actions/checkout@v4
@@ -40,15 +43,20 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Create draft GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1 ||
             gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --verify-tag \
-              --draft --title "OpenMasterHUB v${VERSION}" --generate-notes
+              --draft --prerelease="$PRERELEASE" --title "OpenMasterHUB v${VERSION}" --generate-notes
 
   linux:
     needs: draft
@@ -83,15 +91,19 @@ jobs:
           # `tauri build` (not plain cargo) so the UI is embedded instead of loaded from the dev server.
           (cd app && npx tauri build --no-bundle -- --locked)
 
-      # makepkg refuses to run as root, which the container is.
+      # makepkg refuses to run as root, which the container is. Pre-releases have no AUR
+      # package (makepkg rejects `-` in pkgver).
       - name: Stage release and test the AUR package
         env:
           VERSION: ${{ needs.draft.outputs.version }}
+          PRERELEASE: ${{ needs.draft.outputs.prerelease }}
         run: |
           useradd -m builder
           install -d -o builder /tmp/release
           runuser -u builder -- .github/scripts/stage-release.sh "$VERSION" "$PWD/target" /tmp/release
-          runuser -u builder -- .github/scripts/test-pkgbuild.sh /tmp/release "$VERSION"
+          if [ "$PRERELEASE" != true ]; then
+            runuser -u builder -- .github/scripts/test-pkgbuild.sh /tmp/release "$VERSION"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
@@ -145,9 +157,16 @@ jobs:
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest
+          PRERELEASE: ${{ needs.draft.outputs.prerelease }}
+        run: |
+          if [ "$PRERELEASE" = true ]; then
+            gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --prerelease --latest=false
+          else
+            gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false --latest
+          fi
 
       - name: Check the public tarball matches the PKGBUILD
+        if: needs.draft.outputs.prerelease != 'true'
         env:
           VERSION: ${{ needs.draft.outputs.version }}
         run: |
@@ -159,6 +178,7 @@ jobs:
           [ "$expected" = "$actual" ] || { echo "::error::published tarball does not match the PKGBUILD checksum"; exit 1; }
 
       - name: Publish to AUR
+        if: needs.draft.outputs.prerelease != 'true'
         uses: KSXGitHub/github-actions-deploy-aur@v4.1.2
         with:
           pkgname: openmasterhub-bin
