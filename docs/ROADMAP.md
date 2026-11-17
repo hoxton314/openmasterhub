@@ -34,6 +34,10 @@ identical while other platforms are added.
     whose process exited, as on Linux.
   - the service log is capped at 1 MiB (one previous log kept).
 
+- **Resume from suspend** (unreleased, issue 32): on Linux the service notices a resume
+  (`CLOCK_BOOTTIME` vs `CLOCK_MONOTONIC`) and 2 s later reconnects every module, because the
+  kernel may reset the keypad without disconnecting it. Not detected on Windows yet.
+
 - **Claude Code session keys** (unreleased): `claude_session` widget and `session` action, a
   Claude profile in `examples/config.toml`. `[status] sort` (`urgent` by default, `changed`, `started`)
   and paging through more sessions than keys with the left roller (`sessions` action).

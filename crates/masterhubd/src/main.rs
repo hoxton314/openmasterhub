@@ -11,12 +11,13 @@ mod focus;
 mod hid;
 mod ipc;
 mod keyboard;
+mod resume;
 mod stats;
 mod worker;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -130,17 +131,23 @@ fn main() -> Result<()> {
 
     log::info!("masterhubd started, config {}", path.display());
     let mut workers: HashMap<String, JoinHandle<()>> = HashMap::new();
+    // Bumped after each resume from suspend; workers then reconnect to re-initialise their module.
+    let resumes = Arc::new(AtomicU64::new(0));
+    let mut sleep_watch = resume::SleepWatch::new();
     while !shutdown.load(Ordering::Relaxed) {
+        if sleep_watch.poll() {
+            resumes.fetch_add(1, Ordering::Relaxed);
+        }
         workers.retain(|_, h| !h.is_finished());
         for info in hid::enumerate() {
             if workers.contains_key(&info.serial) {
                 continue;
             }
             let serial = info.serial.clone();
-            let (tx, shutdown) = (ctl_tx.clone(), shutdown.clone());
+            let (tx, shutdown, resumes) = (ctl_tx.clone(), shutdown.clone(), resumes.clone());
             let handle = thread::Builder::new()
                 .name(format!("{}-{}", info.kind.name(), serial))
-                .spawn(move || worker::run(info, tx, shutdown))
+                .spawn(move || worker::run(info, tx, shutdown, resumes))
                 .context("spawning worker")?;
             workers.insert(serial, handle);
         }
