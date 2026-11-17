@@ -202,6 +202,13 @@ session again when they finish, so it stays **working** until then (`Stop` lists
 `background_tasks`). Background shells and monitors don't count: a dev server may run for good
 without the session doing anything.
 
+Claude Code also writes `"status": "waiting"` to its session file (`~/.claude/sessions/<pid>.json`)
+while a prompt or dialog waits for you, including some no hook reports (for example after the
+desktop app restarts a session that was waiting). The service checks that file every second: a
+session that starts waiting turns **attention**, and when it stops waiting it takes the file's
+status again, unless a hook event has changed it in between. Sessions found only through these
+files (open before the service started) get attention the same way.
+
 Tool events from subagents (and `SubagentStart`, if you add that hook) turn a ready session back
 to working, but never stop the flash while the main session waits for you. If a session's
 process has been idle with nothing reported for 15 minutes while it shows working (background

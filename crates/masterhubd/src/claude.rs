@@ -169,7 +169,8 @@ fn claude_pid() -> Option<u32> {
 pub struct SessionFile {
     pub pid: Option<u32>,
     pub session_id: Option<String>,
-    /// `busy` or `idle`.
+    /// `busy`, `idle`, or `waiting` while a prompt or dialog waits for the user (permission,
+    /// question, "input needed").
     pub status: Option<String>,
     /// Start time of the process in clock ticks since boot (Linux), to tell a reused pid apart.
     pub proc_start: Option<String>,
@@ -203,9 +204,18 @@ impl SessionFile {
             .collect()
     }
 
-    /// The status the file reports; it knows nothing about questions waiting for an answer.
+    /// The status the file reports.
     pub fn status(&self) -> Status {
-        if self.status.as_deref() == Some("busy") { Status::Working } else { Status::Ready }
+        match self.status.as_deref() {
+            Some("busy") => Status::Working,
+            Some("waiting") => Status::Attention,
+            _ => Status::Ready,
+        }
+    }
+
+    /// Whether a prompt or dialog waits for the user.
+    pub fn waiting(&self) -> bool {
+        self.status.as_deref() == Some("waiting")
     }
 
     /// What a key shows: the session name, else the name of its folder.
@@ -295,6 +305,9 @@ mod tests {
         .unwrap();
         assert_eq!(f.title().as_deref(), Some("Claude preset"));
         assert_eq!(f.status(), Status::Working);
+        let waiting: SessionFile = serde_json::from_str(r#"{"status":"waiting","waitingFor":"input needed"}"#).unwrap();
+        assert_eq!(waiting.status(), Status::Attention);
+        assert!(waiting.waiting());
         assert_eq!(f.started_at, Some(1792000000000));
         assert_eq!(f.desktop_link().as_deref(), Some("claude://code/continue?session=local_0000demo-0001"));
 

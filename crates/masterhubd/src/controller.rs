@@ -84,6 +84,8 @@ struct Reporter {
     view: Option<View>,
     /// When its key on the hub was last pressed, in milliseconds since the epoch (0: never).
     pressed: u64,
+    /// Its session file said a prompt waits for the user at the last tick.
+    waiting: bool,
     /// What Claude Code wrote about the session, re-read every tick (the name changes).
     file: Option<SessionFile>,
     /// Found in the session files rather than reported by a hook; its status follows the file
@@ -571,6 +573,14 @@ impl Controller {
                     log::info!("status {source}: idle and silent for {BACKGROUND_TIMEOUT:?}, ready");
                     changed |= r.set(Status::Ready, &mut self.reports);
                 }
+                // Claude Code marks its file while a prompt or dialog waits for you, including
+                // ones no hook reports; follow it until the next hook event says otherwise.
+                let waiting = r.file.as_ref().is_some_and(SessionFile::waiting);
+                if let Some(status) = file_wait(r.status, r.waiting, waiting, r.file.as_ref().map(SessionFile::status)) {
+                    log::info!("status {source}: session file {}", if waiting { "waits for you" } else { "no longer waits" });
+                    changed |= r.set(status, &mut self.reports);
+                }
+                r.waiting = waiting;
             }
         }
         for (pid, file) in SessionFile::running() {
@@ -1113,6 +1123,7 @@ impl Reporter {
             changed_at: now_ms(),
             view: None,
             pressed: 0,
+            waiting: false,
             file,
             discovered: false,
             remote: false,
@@ -1179,6 +1190,17 @@ fn page_start(offset: usize, total: usize, slots: usize) -> usize {
         return 0;
     }
     (offset / slots * slots).min(total.saturating_sub(1) / slots * slots)
+}
+
+/// What a session's status becomes when its file starts or stops waiting for the user (`was`,
+/// `now`), `None` to keep it: attention while it waits, then what the file says, unless a hook
+/// has changed the status in between.
+fn file_wait(status: Status, was: bool, now: bool, file: Option<Status>) -> Option<Status> {
+    match (was, now) {
+        (false, true) if status != Status::Attention => Some(Status::Attention),
+        (true, false) if status == Status::Attention => file.filter(|s| *s != Status::Attention),
+        _ => None,
+    }
 }
 
 fn now_ms() -> u64 {
@@ -1274,6 +1296,23 @@ mod tests {
         let mut v: Vec<&Reporter> = all.iter().collect();
         sort_sessions(&mut v, SessionSort::Urgent);
         assert_eq!(v.iter().map(|r| r.started().0).collect::<Vec<_>>(), [6, 2, 5, 3, 1, 4]);
+    }
+
+    #[test]
+    fn follows_waiting_session_files() {
+        use Status::*;
+        // A prompt no hook reported: attention.
+        assert_eq!(file_wait(Ready, false, true, Some(Attention)), Some(Attention));
+        // Still waiting, but a hook has since said otherwise (answered, file not rewritten yet).
+        assert_eq!(file_wait(Working, true, true, Some(Attention)), None);
+        assert_eq!(file_wait(Attention, false, true, Some(Attention)), None);
+        // Answered, and no hook said so: what the file says now.
+        assert_eq!(file_wait(Attention, true, false, Some(Working)), Some(Working));
+        assert_eq!(file_wait(Attention, true, false, Some(Ready)), Some(Ready));
+        // A hook already moved it on.
+        assert_eq!(file_wait(Working, true, false, Some(Working)), None);
+        // Attention from a hook, the file never waited: left alone.
+        assert_eq!(file_wait(Attention, false, false, Some(Working)), None);
     }
 
     #[test]
