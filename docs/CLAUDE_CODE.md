@@ -7,9 +7,9 @@ On the Base, with several sessions open, the most urgent one wins:
 | Status | Default | When |
 | --- | --- | --- |
 | attention | `#ff4000`, **flashing** | a session waits for you: permission prompt, question, plan approval |
-| ready | `#00ff40` | a session finished its turn and waits for a new prompt |
-| working | `#0060ff` | every session is busy, or waits for its background agents |
-| (none) | your `[leds] base` colour | no Claude Code session is open |
+| ready | `#00ff40` | a session finished its turn and you haven't [checked it](#checked-sessions) yet |
+| working | `#0060ff` | every other session is busy, or waits for its background agents |
+| (none) | your `[leds] base` colour | no Claude Code session is open, or all are finished and checked |
 
 Works on Linux and Windows. The service forgets a session whose `claude` process has exited,
 even if it never sent `SessionEnd`.
@@ -85,11 +85,58 @@ key's background is tinted with the session's status colour and the mascot's pos
 | --- | --- |
 | working | `working` background, mascot typing (animated) |
 | ready | `ready` background, mascot standing |
+| ready, checked | faint `ready` background, faded mascot and name |
 | attention | `attention` background flashing with the Base, mascot waving |
 
-Sessions fill the slots oldest first, so keys don't move around as sessions come and go; an
-empty slot shows the key as configured (blank, unless you gave it a label). The `session` action
-brings a session up:
+Sessions that wait for you fill the first slots, then finished ones you haven't checked, then
+working ones, and finished ones you have checked come last; within each, the most recent status
+change comes first. An empty slot shows the key as configured (blank, unless you gave it a
+label). `sort` in `[status]` changes the order:
+
+| `sort` | Order |
+| --- | --- |
+| `urgent` (default) | waiting for you (permission prompt, question, plan approval), then ready and not checked, then working, then ready and checked; most recent change first within each |
+| `changed` | most recent status change first |
+| `started` | oldest first, so keys don't move around as sessions come and go |
+
+```toml
+[status]
+sort = "started"
+```
+
+### Checked sessions
+
+A finished (ready) session counts as **checked** once you have looked at it after its turn
+ended:
+
+- **Claude desktop app** sessions (local or over SSH): the app showed the session after the
+  turn ended (`lastFocusedAt` after `lastTurnEdgeAt` in its session file).
+- **Any session**: you brought it up from its key on the hub.
+
+A terminal session only counts as checked when you bring it up from the hub: nothing tells the
+service you switched to its window by hand. A checked session stays checked until its status
+changes again; a new prompt makes it working, and the next finished turn makes it unchecked.
+
+### More sessions than keys
+
+With more sessions open than session keys on the page, the **left roller** scrolls them a page
+at a time: roll it away from you for the previous page, towards you for the next. It stops at
+either end. The first key shows a small ▲ when sessions are scrolled off above, the last key a
+▼ when there are more below; the arrow is in the `attention` colour when one of those sessions
+waits for you. Switching profiles goes back to the first page.
+
+The left roller does this on its own on a page with session keys, unless the profile binds the
+left roller to something else. To bind it yourself (or use the right roller, a knob or keys),
+use the `sessions` action:
+
+```toml
+[[profile.roller]]
+side = "left"
+away = { sessions = "prev" }
+toward = { sessions = "next" }
+```
+
+The `session` action brings up the session on that key (on the page shown):
 
 - **Claude desktop app** sessions open in the app (`claude://code/continue?session=local_…`)
   and its window comes to the front.
@@ -104,8 +151,9 @@ widget = { kind = "claude_session", slot = 0 }
 press = { session = 0 }
 ```
 
-`examples/config.toml` has a ready-made **Claude** profile: thirteen session keys, *New*
-(`claude://code/new`) and *Back*, which returns to the profile shown before. It
+`examples/config.toml` has a ready-made **Claude** profile: thirteen session keys (scrolled
+with the left roller), *New* (`claude://code/new`) and *Back*, which returns
+to the profile shown before. It
 activates while the Claude app is focused, and a pinned *Claude* key on every page of every
 profile switches to it from anywhere:
 
@@ -116,7 +164,8 @@ label = "Claude"
 press = { profile = "Claude" }
 except = ["Claude"]   # the Claude profile shows its own key there
 ``` In the app, pick the **Claude**
-widget and the **Claude** action and choose the same session number.
+widget and the **Claude** action and choose the same session number; **Scroll Claude** is the
+`sessions` action.
 
 Session keys use the same hooks as the Base LED (set up above), and the names come from the
 files Claude Code keeps in `~/.claude/sessions/` (`$CLAUDE_CONFIG_DIR/sessions/`).
@@ -152,6 +201,13 @@ A turn can end while subagents or workflows keep running in the background; they
 session again when they finish, so it stays **working** until then (`Stop` lists them in
 `background_tasks`). Background shells and monitors don't count: a dev server may run for good
 without the session doing anything.
+
+Claude Code also writes `"status": "waiting"` to its session file (`~/.claude/sessions/<pid>.json`)
+while a prompt or dialog waits for you, including some no hook reports (for example after the
+desktop app restarts a session that was waiting). The service checks that file every second: a
+session that starts waiting turns **attention**, and when it stops waiting it takes the file's
+status again, unless a hook event has changed it in between. Sessions found only through these
+files (open before the service started) get attention the same way.
 
 Tool events from subagents (and `SubagentStart`, if you add that hook) turn a ready session back
 to working, but never stop the flash while the main session waits for you. If a session's

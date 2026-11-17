@@ -44,6 +44,8 @@ struct DesktopFile {
     /// When the last prompt was sent, and when the last turn ended.
     latest_user_frame_at: Option<u64>,
     last_turn_edge_at: Option<u64>,
+    /// When the session was last on screen in the app.
+    last_focused_at: Option<u64>,
     is_archived: bool,
     /// Set for a session that runs over SSH.
     ssh_config: Option<serde_json::Value>,
@@ -76,6 +78,14 @@ pub struct RemoteSession {
 }
 
 /// The desktop app's session files, re-read only when they change.
+/// When a session of the desktop app was last on screen, and when its last turn ended
+/// (milliseconds since the epoch).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct View {
+    pub focused: u64,
+    pub turn_ended: Option<u64>,
+}
+
 #[derive(Default)]
 pub struct DesktopSessions {
     files: HashMap<PathBuf, (SystemTime, Option<DesktopFile>)>,
@@ -102,6 +112,19 @@ impl DesktopSessions {
 
     /// Whether a background agent of session `cli` is still running, from the transcript the
     /// app syncs here.
+    /// When each of the app's sessions (local or remote, by Claude Code session id) was last on
+    /// screen and when its last turn ended, from the files read by the last [`Self::remote`].
+    pub fn views(&self) -> HashMap<String, View> {
+        self.files
+            .values()
+            .filter_map(|(_, f)| f.as_ref())
+            .filter_map(|f| {
+                let view = View { focused: f.last_focused_at?, turn_ended: f.last_turn_edge_at };
+                Some((f.cli_session_id.clone()?, view))
+            })
+            .collect()
+    }
+
     fn agents_running(&mut self, cli: &str, now: SystemTime) -> bool {
         // The id ends up in a path.
         if cli.is_empty() || !cli.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {

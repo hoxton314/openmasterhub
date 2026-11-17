@@ -62,7 +62,7 @@ fn run(rx: Receiver<Request>) {
                     None => log::error!("mute {m:?}: unknown audio group"),
                 },
                 // Navigation and sessions are handled by the controller and never reach this thread.
-                Action::Page(_) | Action::Folder(_) | Action::Back(_) | Action::Profile(_) | Action::Session(_) => {}
+                Action::Page(_) | Action::Folder(_) | Action::Back(_) | Action::Profile(_) | Action::Session(_) | Action::Sessions(_) => {}
                 Action::Cmd(cmd) => {
                     let cmd = match req.value {
                         Some(v) => cmd.replace("{value}", &v.to_string()),

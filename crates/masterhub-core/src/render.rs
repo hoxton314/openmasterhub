@@ -30,8 +30,10 @@ pub enum LiveData {
     Media { title: String, artist: String, art: Option<RgbaImage> },
     /// A Claude Code session: its name and the mascot in the pose of its status, on a
     /// background tinted with the status `color`. `frame` advances the working animation and
-    /// flashes the attention background (odd = dim).
-    Session { name: String, status: Status, color: Color, frame: u32 },
+    /// flashes the attention background (odd = dim). `above`/`below`: the colour of a small
+    /// arrow in the corner when more sessions are scrolled off that way. `checked`: finished
+    /// and already looked at, drawn faded.
+    Session { name: String, status: Status, color: Color, frame: u32, checked: bool, above: Option<Color>, below: Option<Color> },
 }
 
 /// A decoded image or animation from a face's `image` path.
@@ -120,16 +122,26 @@ impl Renderer {
                 self.text(&mut img, title, s * 0.72, s * 0.15, s * 0.9, fg);
                 self.text(&mut img, artist, s * 0.87, s * 0.11, s * 0.9, dim(fg));
             }
-            Some(LiveData::Session { name, status, color, frame }) => {
+            Some(LiveData::Session { name, status, color, frame, checked, above, below }) => {
                 let tint = match status {
                     Status::Attention if frame % 2 == 1 => 0.2,
                     Status::Attention => 0.5,
+                    _ if *checked => 0.12,
                     _ => 0.4,
                 };
+                let fg = if *checked { dim(dim(fg)) } else { fg };
                 let back = mix(bg, *color, tint);
                 img = RgbImage::from_pixel(size, size, Rgb([back.r, back.g, back.b]));
-                draw_mascot(&mut img, mascot(*status, *frame), s * 0.05, s * 0.6);
+                // Checked: the mascot fades into the background.
+                let fade = if *checked { 0.55 } else { 0.0 };
+                draw_mascot(&mut img, mascot(*status, *frame), s * 0.05, s * 0.6, back, fade);
                 self.two_lines(&mut img, name, s * 0.83, s * 0.15, s * 0.92, fg);
+                if let Some(c) = above {
+                    draw_arrow(&mut img, true, *c);
+                }
+                if let Some(c) = below {
+                    draw_arrow(&mut img, false, *c);
+                }
             }
             None => {
                 if let Some(pic) = picture {
@@ -335,8 +347,9 @@ fn mascot(status: Status, frame: u32) -> &'static [&'static str; 11] {
 const MASCOT_BODY: Color = Color::new(0xd9, 0x77, 0x57);
 const MASCOT_EYES: Color = Color::new(0x14, 0x14, 0x14);
 
-/// Draw a sprite centred horizontally, `top` from the top edge and at most `height` tall.
-fn draw_mascot(img: &mut RgbImage, sprite: &[&str; 11], top: f32, height: f32) {
+/// Draw a sprite centred horizontally, `top` from the top edge and at most `height` tall,
+/// mixed by `fade` (0..=1) into the background `back`.
+fn draw_mascot(img: &mut RgbImage, sprite: &[&str; 11], top: f32, height: f32, back: Color, fade: f32) {
     let size = img.width();
     let cell = ((height / sprite.len() as f32) as u32).max(1);
     let w = sprite[0].len() as u32 * cell;
@@ -348,6 +361,7 @@ fn draw_mascot(img: &mut RgbImage, sprite: &[&str; 11], top: f32, height: f32) {
                 'o' => MASCOT_EYES,
                 _ => continue,
             };
+            let c = mix(c, back, fade);
             for dy in 0..cell {
                 for dx in 0..cell {
                     let (x, y) = (x0 + col as u32 * cell + dx, y0 + row as u32 * cell + dy);
@@ -355,6 +369,27 @@ fn draw_mascot(img: &mut RgbImage, sprite: &[&str; 11], top: f32, height: f32) {
                         img.put_pixel(x, y, Rgb([c.r, c.g, c.b]));
                     }
                 }
+            }
+        }
+    }
+}
+
+/// A small triangle in the top-right corner (pointing up) or the bottom-right one (pointing
+/// down), clear of the mascot and the name.
+fn draw_arrow(img: &mut RgbImage, up: bool, c: Color) {
+    let s = img.width() as f32;
+    let (w, h) = (s * 0.18, s * 0.11);
+    let right = s * 0.96;
+    let (tip, base) = if up { (s * 0.05, s * 0.05 + h) } else { (s * 0.66, s * 0.66 - h) };
+    let (y0, y1) = (tip.min(base) as u32, tip.max(base).ceil() as u32);
+    for y in y0..y1.min(img.height()) {
+        // Width grows from the tip to the base.
+        let t = ((y as f32 + 0.5 - tip) / (base - tip)).clamp(0.0, 1.0);
+        let half = w * t / 2.0;
+        let mid = right - w / 2.0;
+        for x in (mid - half).round() as u32..(mid + half).round() as u32 {
+            if x < img.width() {
+                img.put_pixel(x, y, Rgb([c.r, c.g, c.b]));
             }
         }
     }
@@ -493,12 +528,43 @@ mod tests {
         let r = Renderer { font: None };
         let color = Color::new(0, 200, 100);
         for status in [Status::Working, Status::Ready, Status::Attention] {
-            let live = LiveData::Session { name: "x".into(), status, color, frame: 0 };
+            let live = LiveData::Session { name: "x".into(), status, color, frame: 0, checked: false, above: None, below: None };
             let img = r.render_rgb(&Face::default(), KEY_SIZE, None, Some(&live));
             let back = mix(Color::new(0, 0, 0), color, if status == Status::Attention { 0.5 } else { 0.4 });
             assert_eq!(img.get_pixel(0, KEY_SIZE - 1).0, [back.r, back.g, back.b], "{status:?}");
             let body = MASCOT_BODY;
             assert!(img.pixels().filter(|p| p.0 == [body.r, body.g, body.b]).count() > 300, "{status:?}");
         }
+    }
+
+    #[test]
+    fn session_scroll_arrows() {
+        let r = Renderer { font: None };
+        let (arrow, color) = (Color::new(255, 0, 0), Color::new(0, 200, 100));
+        let live =
+            |above, below| LiveData::Session { name: String::new(), status: Status::Ready, color, frame: 0, checked: false, above, below };
+        let count = |live: LiveData, top: bool| {
+            let img = r.render_rgb(&Face::default(), KEY_SIZE, None, Some(&live));
+            let half = |y: u32| if top { y < KEY_SIZE / 3 } else { y >= KEY_SIZE / 3 };
+            img.enumerate_pixels().filter(|(_, y, p)| half(*y) && p.0 == [255, 0, 0]).count()
+        };
+        assert_eq!(count(live(None, None), true) + count(live(None, None), false), 0);
+        assert!(count(live(Some(arrow), None), true) > 20);
+        assert_eq!(count(live(Some(arrow), None), false), 0);
+        assert!(count(live(None, Some(arrow)), false) > 20);
+        assert_eq!(count(live(None, Some(arrow)), true), 0);
+    }
+
+    #[test]
+    fn checked_sessions_fade() {
+        let r = Renderer { font: None };
+        let color = Color::new(0, 200, 100);
+        let body = |checked| {
+            let live = LiveData::Session { name: String::new(), status: Status::Ready, color, frame: 0, checked, above: None, below: None };
+            let img = r.render_rgb(&Face::default(), KEY_SIZE, None, Some(&live));
+            img.pixels().filter(|p| p.0 == [MASCOT_BODY.r, MASCOT_BODY.g, MASCOT_BODY.b]).count()
+        };
+        assert!(body(false) > 300);
+        assert_eq!(body(true), 0);
     }
 }

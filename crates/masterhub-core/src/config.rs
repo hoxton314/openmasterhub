@@ -192,6 +192,30 @@ pub struct StatusLeds {
     pub ready: Color,
     /// Busy.
     pub working: Color,
+    /// How session keys are ordered.
+    #[serde(skip_serializing_if = "SessionSort::is_default")]
+    pub sort: SessionSort,
+}
+
+/// The order Claude Code sessions fill the `claude_session` slots in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionSort {
+    /// Oldest first, so keys don't move around.
+    Started,
+    /// Most recent status change first.
+    Changed,
+    /// Waiting for you first, then ready, then working; most recent change first within each.
+    #[default]
+    Urgent,
+}
+
+impl SessionSort {
+    pub const ALL: [SessionSort; 3] = [Self::Started, Self::Changed, Self::Urgent];
+
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 impl Default for StatusLeds {
@@ -201,6 +225,7 @@ impl Default for StatusLeds {
             attention: Color(Rgb::new(0xff, 0x40, 0x00)),
             ready: Color(Rgb::new(0x00, 0xff, 0x40)),
             working: Color(Rgb::new(0x00, 0x60, 0xff)),
+            sort: SessionSort::Urgent,
         }
     }
 }
@@ -263,7 +288,7 @@ pub enum Widget {
     Volume,
     /// MPRIS: title, artist and cover art of the active player.
     NowPlaying,
-    /// The Claude Code session in this slot (0 = the oldest open session): its name and status.
+    /// The Claude Code session in this slot (0 = the first in `[status] sort` order): its name and status.
     /// Empty slots show the face as configured.
     ClaudeSession {
         #[serde(default)]
@@ -422,6 +447,8 @@ pub enum Action {
     Mute(MuteAction),
     /// Bring up the Claude Code session in this slot (see `Widget::ClaudeSession`).
     Session(u8),
+    /// Scroll the Claude Code session keys by a page: `"next"` or `"prev"`.
+    Sessions(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -775,6 +802,12 @@ impl Config {
             {
                 bail!("profile {name:?} does not exist");
             }
+            if let Action::Sessions(d) = action
+                && d != "next"
+                && d != "prev"
+            {
+                bail!("sessions {d:?} must be \"next\" or \"prev\"");
+            }
             let target = match action {
                 Action::Volume(v) => &v.target,
                 Action::Mute(m) => &m.target,
@@ -887,6 +920,8 @@ mod tests {
         let key = claude.pages[0].key(2).unwrap();
         assert_eq!(key.face.widget, Some(Widget::ClaudeSession { slot: 2 }));
         assert_eq!(key.press, Some(Action::Session(2)));
+        let left = claude.rollers.iter().find(|r| r.side == Side::Left).unwrap();
+        assert_eq!(left.toward, Some(Action::Sessions("next".into())));
     }
 
     #[test]
@@ -925,6 +960,15 @@ mod tests {
         assert!(Config::parse(bad_index, Path::new("/")).is_err());
         let bad_volume = "[[profile]]\nname='A'\n[profile.dial]\ncw={volume='up'}\n";
         assert!(Config::parse(bad_volume, Path::new("/")).is_err());
+        let sessions = |dir: &str| format!("[[profile]]\nname='A'\n[[profile.roller]]\nside='left'\naway={{sessions='{dir}'}}\n");
+        assert!(Config::parse(&sessions("prev"), Path::new("/")).is_ok());
+        assert!(Config::parse(&sessions("up"), Path::new("/")).is_err());
+        let sort = |s: &str| Config::parse(&format!("[status]\nsort='{s}'\n"), Path::new("/")).map(|c| c.status.sort);
+        assert_eq!(sort("urgent").unwrap(), SessionSort::Urgent);
+        assert_eq!(sort("changed").unwrap(), SessionSort::Changed);
+        assert_eq!(sort("started").unwrap(), SessionSort::Started);
+        assert_eq!(Config::parse("", Path::new("/")).unwrap().status.sort, SessionSort::Urgent);
+        assert!(sort("newest").is_err());
         let pin = |extra: &str| format!("[[pinned]]\nindex=4\n{extra}\n[[profile]]\nname='A'\n");
         assert!(Config::parse(&pin("press={profile='A'}\nexcept=['A']"), Path::new("/")).is_ok());
         assert!(Config::parse(&pin("except=['Nope']"), Path::new("/")).is_err());
