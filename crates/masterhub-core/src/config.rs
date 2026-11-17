@@ -202,11 +202,11 @@ pub struct StatusLeds {
 #[serde(rename_all = "snake_case")]
 pub enum SessionSort {
     /// Oldest first, so keys don't move around.
-    #[default]
     Started,
     /// Most recent status change first.
     Changed,
     /// Waiting for you first, then ready, then working; most recent change first within each.
+    #[default]
     Urgent,
 }
 
@@ -225,7 +225,7 @@ impl Default for StatusLeds {
             attention: Color(Rgb::new(0xff, 0x40, 0x00)),
             ready: Color(Rgb::new(0x00, 0xff, 0x40)),
             working: Color(Rgb::new(0x00, 0x60, 0xff)),
-            sort: SessionSort::Started,
+            sort: SessionSort::Urgent,
         }
     }
 }
@@ -288,7 +288,7 @@ pub enum Widget {
     Volume,
     /// MPRIS: title, artist and cover art of the active player.
     NowPlaying,
-    /// The Claude Code session in this slot (0 = the oldest open session): its name and status.
+    /// The Claude Code session in this slot (0 = the first in `[status] sort` order): its name and status.
     /// Empty slots show the face as configured.
     ClaudeSession {
         #[serde(default)]
@@ -966,6 +966,8 @@ mod tests {
         let sort = |s: &str| Config::parse(&format!("[status]\nsort='{s}'\n"), Path::new("/")).map(|c| c.status.sort);
         assert_eq!(sort("urgent").unwrap(), SessionSort::Urgent);
         assert_eq!(sort("changed").unwrap(), SessionSort::Changed);
+        assert_eq!(sort("started").unwrap(), SessionSort::Started);
+        assert_eq!(Config::parse("", Path::new("/")).unwrap().status.sort, SessionSort::Urgent);
         assert!(sort("newest").is_err());
         let pin = |extra: &str| format!("[[pinned]]\nindex=4\n{extra}\n[[profile]]\nname='A'\n");
         assert!(Config::parse(&pin("press={profile='A'}\nexcept=['A']"), Path::new("/")).is_ok());

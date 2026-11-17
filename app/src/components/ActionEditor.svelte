@@ -320,7 +320,7 @@
         <select class="select" value={arg} onchange={(e) => { arg = e.currentTarget.value; onchange(build()); }}>
           {#each SLOTS as n}<option value={String(n)}>Session {n + 1}</option>{/each}
         </select>
-        <p class="hint">Brings up the Claude Code session on that key: its window, or the session in the Claude app. Sessions fill the keys in the order set by <code>[status] sort</code> (oldest first by default).</p>
+        <p class="hint">Brings up the Claude Code session on that key: its window, or the session in the Claude app. Sessions fill the keys in the order set by <code>[status] sort</code> (waiting for you first by default).</p>
       {:else if kind === 'sessions'}
         <select class="select" value={arg} onchange={(e) => { arg = e.currentTarget.value; onchange(build()); }}>
           <option value="next">Next page</option>

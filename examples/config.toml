@@ -27,7 +27,7 @@
 #
 # Widgets (key or dial face): { kind = "clock", format = "%H:%M" }, cpu_usage, cpu_temp,
 #   ram_usage, gpu_usage, gpu_temp, volume, now_playing, and { kind = "claude_session", slot = 0 }
-#   (an open Claude Code session, oldest first: its name and status; see docs/CLAUDE_CODE.md).
+#   (an open Claude Code session, in [status] sort order: its name and status; see docs/CLAUDE_CODE.md).
 #   On Windows, cpu_temp (and the GPU widgets without an NVIDIA driver) read
 #   LibreHardwareMonitor while it runs.
 # Images: PNG/JPEG, or GIF (animated).
@@ -58,10 +58,10 @@ brightness = 100
 attention = "#ff4000"   # a session waits for your answer: flashes
 ready = "#00ff40"       # finished, waiting for a new prompt
 working = "#0060ff"
-# Order of the session keys: "started" (oldest first, the default: keys don't move around),
-# "changed" (most recent status change first) or "urgent" (waiting for you, then ready, then
-# working; most recent change first within each).
-sort = "urgent"
+# Order of the session keys: "urgent" (the default: waiting for you, then ready, then working;
+# most recent change first within each), "changed" (most recent status change first) or
+# "started" (oldest first, so keys don't move around).
+# sort = "started"
 
 # Pinned keys show on every page and folder of every profile, over the page's own key there
 # (not in the profiles listed in `except`).

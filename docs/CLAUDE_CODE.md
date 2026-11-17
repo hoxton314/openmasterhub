@@ -87,19 +87,19 @@ key's background is tinted with the session's status colour and the mascot's pos
 | ready | `ready` background, mascot standing |
 | attention | `attention` background flashing with the Base, mascot waving |
 
-Sessions fill the slots oldest first, so keys don't move around as sessions come and go; an
-empty slot shows the key as configured (blank, unless you gave it a label). `sort` in `[status]`
-changes the order:
+Sessions that wait for you fill the first slots, then ready ones, then working ones; within
+each, the most recent status change comes first. An empty slot shows the key as configured
+(blank, unless you gave it a label). `sort` in `[status]` changes the order:
 
 | `sort` | Order |
 | --- | --- |
-| `started` (default) | oldest first; keys stay put |
+| `urgent` (default) | waiting for you (permission prompt, question, plan approval) first, then ready, then working; most recent change first within each |
 | `changed` | most recent status change first |
-| `urgent` | waiting for you (permission prompt, question, plan approval) first, then ready, then working; most recent change first within each |
+| `started` | oldest first, so keys don't move around as sessions come and go |
 
 ```toml
 [status]
-sort = "urgent"
+sort = "started"
 ```
 
 ### More sessions than keys
@@ -136,8 +136,8 @@ widget = { kind = "claude_session", slot = 0 }
 press = { session = 0 }
 ```
 
-`examples/config.toml` has a ready-made **Claude** profile: thirteen session keys (sorted
-`urgent`, scrolled with the left roller), *New* (`claude://code/new`) and *Back*, which returns
+`examples/config.toml` has a ready-made **Claude** profile: thirteen session keys (scrolled
+with the left roller), *New* (`claude://code/new`) and *Back*, which returns
 to the profile shown before. It
 activates while the Claude app is focused, and a pinned *Claude* key on every page of every
 profile switches to it from anywhere:

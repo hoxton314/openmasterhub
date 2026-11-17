@@ -35,7 +35,7 @@ identical while other platforms are added.
   - the service log is capped at 1 MiB (one previous log kept).
 
 - **Claude Code session keys** (unreleased): `claude_session` widget and `session` action, a
-  Claude profile in `examples/config.toml`. `[status] sort` (`started`, `changed`, `urgent`)
+  Claude profile in `examples/config.toml`. `[status] sort` (`urgent` by default, `changed`, `started`)
   and paging through more sessions than keys with the left roller (`sessions` action).
   Which physical roller reports as "left" is still unverified (see below). Bringing up terminal sessions on Windows
   (`SetForegroundWindow`) is untested.
