@@ -2,7 +2,7 @@
 //! input to the controller and executes display/LED commands from it.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::time::Duration;
 
@@ -20,11 +20,15 @@ pub enum DeviceCmd {
     Backlight(u8),
 }
 
-pub fn run(info: ModuleInfo, controller: Sender<Msg>, shutdown: Arc<AtomicBool>) {
+/// Runs until the module disconnects, the service shuts down or `resumes` changes (the system
+/// resumed from suspend); the main loop then starts a new worker, which initialises the module
+/// again.
+pub fn run(info: ModuleInfo, controller: Sender<Msg>, shutdown: Arc<AtomicBool>, resumes: Arc<AtomicU64>) {
     let name = format!("{} {}", info.kind.name(), info.serial);
     let (tx, rx) = channel();
     let result = HidDevice::open(&info).and_then(|dev| {
-        let mut w = Worker { dev, controller: controller.clone(), shutdown };
+        let resumed = resumes.load(Ordering::Relaxed);
+        let mut w = Worker { dev, controller: controller.clone(), shutdown, resumes, resumed };
         w.run(tx, rx)
     });
     if let Err(e) = result {
@@ -37,6 +41,9 @@ struct Worker {
     dev: HidDevice,
     controller: Sender<Msg>,
     shutdown: Arc<AtomicBool>,
+    resumes: Arc<AtomicU64>,
+    /// `resumes` when this worker started.
+    resumed: u64,
 }
 
 impl Worker {
@@ -63,6 +70,10 @@ impl Worker {
         let mut buf = [0u8; 64];
         let result = loop {
             if self.shutdown.load(Ordering::Relaxed) {
+                break Ok(());
+            }
+            if self.resumes.load(Ordering::Relaxed) != self.resumed {
+                log::info!("{} {}: reconnecting after resume", kind.name(), self.dev.info.serial);
                 break Ok(());
             }
             if let Err(e) = self.drain(&rx) {
