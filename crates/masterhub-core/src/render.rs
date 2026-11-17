@@ -30,8 +30,9 @@ pub enum LiveData {
     Media { title: String, artist: String, art: Option<RgbaImage> },
     /// A Claude Code session: its name and the mascot in the pose of its status, on a
     /// background tinted with the status `color`. `frame` advances the working animation and
-    /// flashes the attention background (odd = dim).
-    Session { name: String, status: Status, color: Color, frame: u32 },
+    /// flashes the attention background (odd = dim). `above`/`below`: the colour of a small
+    /// arrow in the corner when more sessions are scrolled off that way.
+    Session { name: String, status: Status, color: Color, frame: u32, above: Option<Color>, below: Option<Color> },
 }
 
 /// A decoded image or animation from a face's `image` path.
@@ -120,7 +121,7 @@ impl Renderer {
                 self.text(&mut img, title, s * 0.72, s * 0.15, s * 0.9, fg);
                 self.text(&mut img, artist, s * 0.87, s * 0.11, s * 0.9, dim(fg));
             }
-            Some(LiveData::Session { name, status, color, frame }) => {
+            Some(LiveData::Session { name, status, color, frame, above, below }) => {
                 let tint = match status {
                     Status::Attention if frame % 2 == 1 => 0.2,
                     Status::Attention => 0.5,
@@ -130,6 +131,12 @@ impl Renderer {
                 img = RgbImage::from_pixel(size, size, Rgb([back.r, back.g, back.b]));
                 draw_mascot(&mut img, mascot(*status, *frame), s * 0.05, s * 0.6);
                 self.two_lines(&mut img, name, s * 0.83, s * 0.15, s * 0.92, fg);
+                if let Some(c) = above {
+                    draw_arrow(&mut img, true, *c);
+                }
+                if let Some(c) = below {
+                    draw_arrow(&mut img, false, *c);
+                }
             }
             None => {
                 if let Some(pic) = picture {
@@ -360,6 +367,27 @@ fn draw_mascot(img: &mut RgbImage, sprite: &[&str; 11], top: f32, height: f32) {
     }
 }
 
+/// A small triangle in the top-right corner (pointing up) or the bottom-right one (pointing
+/// down), clear of the mascot and the name.
+fn draw_arrow(img: &mut RgbImage, up: bool, c: Color) {
+    let s = img.width() as f32;
+    let (w, h) = (s * 0.18, s * 0.11);
+    let right = s * 0.96;
+    let (tip, base) = if up { (s * 0.05, s * 0.05 + h) } else { (s * 0.66, s * 0.66 - h) };
+    let (y0, y1) = (tip.min(base) as u32, tip.max(base).ceil() as u32);
+    for y in y0..y1.min(img.height()) {
+        // Width grows from the tip to the base.
+        let t = ((y as f32 + 0.5 - tip) / (base - tip)).clamp(0.0, 1.0);
+        let half = w * t / 2.0;
+        let mid = right - w / 2.0;
+        for x in (mid - half).round() as u32..(mid + half).round() as u32 {
+            if x < img.width() {
+                img.put_pixel(x, y, Rgb([c.r, c.g, c.b]));
+            }
+        }
+    }
+}
+
 fn mix(a: Color, b: Color, t: f32) -> Color {
     let m = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t) as u8;
     Color::new(m(a.r, b.r), m(a.g, b.g), m(a.b, b.b))
@@ -493,12 +521,29 @@ mod tests {
         let r = Renderer { font: None };
         let color = Color::new(0, 200, 100);
         for status in [Status::Working, Status::Ready, Status::Attention] {
-            let live = LiveData::Session { name: "x".into(), status, color, frame: 0 };
+            let live = LiveData::Session { name: "x".into(), status, color, frame: 0, above: None, below: None };
             let img = r.render_rgb(&Face::default(), KEY_SIZE, None, Some(&live));
             let back = mix(Color::new(0, 0, 0), color, if status == Status::Attention { 0.5 } else { 0.4 });
             assert_eq!(img.get_pixel(0, KEY_SIZE - 1).0, [back.r, back.g, back.b], "{status:?}");
             let body = MASCOT_BODY;
             assert!(img.pixels().filter(|p| p.0 == [body.r, body.g, body.b]).count() > 300, "{status:?}");
         }
+    }
+
+    #[test]
+    fn session_scroll_arrows() {
+        let r = Renderer { font: None };
+        let (arrow, color) = (Color::new(255, 0, 0), Color::new(0, 200, 100));
+        let live = |above, below| LiveData::Session { name: String::new(), status: Status::Ready, color, frame: 0, above, below };
+        let count = |live: LiveData, top: bool| {
+            let img = r.render_rgb(&Face::default(), KEY_SIZE, None, Some(&live));
+            let half = |y: u32| if top { y < KEY_SIZE / 3 } else { y >= KEY_SIZE / 3 };
+            img.enumerate_pixels().filter(|(_, y, p)| half(*y) && p.0 == [255, 0, 0]).count()
+        };
+        assert_eq!(count(live(None, None), true) + count(live(None, None), false), 0);
+        assert!(count(live(Some(arrow), None), true) > 20);
+        assert_eq!(count(live(Some(arrow), None), false), 0);
+        assert!(count(live(None, Some(arrow)), false) > 20);
+        assert_eq!(count(live(None, Some(arrow)), true), 0);
     }
 }

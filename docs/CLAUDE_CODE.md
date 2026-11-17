@@ -88,8 +88,40 @@ key's background is tinted with the session's status colour and the mascot's pos
 | attention | `attention` background flashing with the Base, mascot waving |
 
 Sessions fill the slots oldest first, so keys don't move around as sessions come and go; an
-empty slot shows the key as configured (blank, unless you gave it a label). The `session` action
-brings a session up:
+empty slot shows the key as configured (blank, unless you gave it a label). `sort` in `[status]`
+changes the order:
+
+| `sort` | Order |
+| --- | --- |
+| `started` (default) | oldest first; keys stay put |
+| `changed` | most recent status change first |
+| `urgent` | waiting for you (permission prompt, question, plan approval) first, then ready, then working; most recent change first within each |
+
+```toml
+[status]
+sort = "urgent"
+```
+
+### More sessions than keys
+
+With more sessions open than session keys on the page, the **left roller** scrolls them a page
+at a time: roll it away from you for the previous page, towards you for the next. It stops at
+either end. The first key shows a small ▲ when sessions are scrolled off above, the last key a
+▼ when there are more below; the arrow is in the `attention` colour when one of those sessions
+waits for you. Switching profiles goes back to the first page.
+
+The left roller does this on its own on a page with session keys, unless the profile binds the
+left roller to something else. To bind it yourself (or use the right roller, a knob or keys),
+use the `sessions` action:
+
+```toml
+[[profile.roller]]
+side = "left"
+away = { sessions = "prev" }
+toward = { sessions = "next" }
+```
+
+The `session` action brings up the session on that key (on the page shown):
 
 - **Claude desktop app** sessions open in the app (`claude://code/continue?session=local_…`)
   and its window comes to the front.
@@ -104,8 +136,9 @@ widget = { kind = "claude_session", slot = 0 }
 press = { session = 0 }
 ```
 
-`examples/config.toml` has a ready-made **Claude** profile: thirteen session keys, *New*
-(`claude://code/new`) and *Back*, which returns to the profile shown before. It
+`examples/config.toml` has a ready-made **Claude** profile: thirteen session keys (sorted
+`urgent`, scrolled with the left roller), *New* (`claude://code/new`) and *Back*, which returns
+to the profile shown before. It
 activates while the Claude app is focused, and a pinned *Claude* key on every page of every
 profile switches to it from anywhere:
 
@@ -116,7 +149,8 @@ label = "Claude"
 press = { profile = "Claude" }
 except = ["Claude"]   # the Claude profile shows its own key there
 ``` In the app, pick the **Claude**
-widget and the **Claude** action and choose the same session number.
+widget and the **Claude** action and choose the same session number; **Scroll Claude** is the
+`sessions` action.
 
 Session keys use the same hooks as the Base LED (set up above), and the names come from the
 files Claude Code keeps in `~/.claude/sessions/` (`$CLAUDE_CONFIG_DIR/sessions/`).

@@ -210,6 +210,7 @@ export function describe(a: Action | undefined): string {
     return `${verb}${what ? ` ${what}` : ''}${m.state === 'toggle' ? ': toggle' : ''}`;
   }
   if ('session' in a) return `Open Claude session ${a.session + 1}`;
+  if ('sessions' in a) return a.sessions === 'prev' ? 'Previous Claude sessions' : 'Next Claude sessions';
   return `Switch to profile “${a.profile}”`;
 }
 

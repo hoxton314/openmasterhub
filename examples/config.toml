@@ -23,6 +23,7 @@
 #                                   shown before)
 #   { profile = "<profile name>" }  switch profile
 #   { session = 0 }                 bring up a Claude Code session by slot (see the widget)
+#   { sessions = "next" }           scroll the session keys by a page: "next" or "prev"
 #
 # Widgets (key or dial face): { kind = "clock", format = "%H:%M" }, cpu_usage, cpu_temp,
 #   ram_usage, gpu_usage, gpu_temp, volume, now_playing, and { kind = "claude_session", slot = 0 }
@@ -57,6 +58,10 @@ brightness = 100
 attention = "#ff4000"   # a session waits for your answer: flashes
 ready = "#00ff40"       # finished, waiting for a new prompt
 working = "#0060ff"
+# Order of the session keys: "started" (oldest first, the default: keys don't move around),
+# "changed" (most recent status change first) or "urgent" (waiting for you, then ready, then
+# working; most recent change first within each).
+sort = "urgent"
 
 # Pinned keys show on every page and folder of every profile, over the page's own key there
 # (not in the profiles listed in `except`).
@@ -305,3 +310,10 @@ index = 14
 label = "Back"
 background = "#3a3a46"
 press = { back = true }   # back to the profile shown before
+
+# More sessions than keys: the left roller scrolls them a page at a time (this is also what it
+# does on a page with session keys when the profile doesn't bind it).
+[[profile.roller]]
+side = "left"
+away = { sessions = "prev" }
+toward = { sessions = "next" }

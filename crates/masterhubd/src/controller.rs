@@ -2,6 +2,7 @@
 //! and is the only place that decides what happens on input. Workers do I/O, the IPC server
 //! reads the shared [`Snapshot`].
 
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -9,7 +10,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use masterhub_core::config::{Action, Color, Config, Face, Leds, Page, Side, Widget};
+use masterhub_core::config::{Action, Color, Config, Face, Leds, Page, SessionSort, Side, Widget};
 use masterhub_core::ipc::{DisplayImage, Event, GUI_APP_ID, HubState, InputMsg, ModuleState, Status, TARGET_DIAL};
 use masterhub_core::layout;
 use masterhub_core::render::{DIAL_SIZE, KEY_SIZE, LiveData, Picture, Renderer, load_picture};
@@ -74,6 +75,8 @@ struct Reporter {
     pid: Option<u32>,
     /// When it first reported, in `Controller::reports`.
     first: u64,
+    /// When its status last changed, in `Controller::reports`.
+    changed: u64,
     /// What Claude Code wrote about the session, re-read every tick (the name changes).
     file: Option<SessionFile>,
     /// Found in the session files rather than reported by a hook; its status follows the file
@@ -112,6 +115,9 @@ pub struct Controller {
     desktop: crate::claude::desktop::DesktopSessions,
     /// Counts status reports, to order sessions that started at the same time.
     reports: u64,
+    /// The first session shown on the session keys, when there are more sessions than keys
+    /// (scrolled a page at a time).
+    session_offset: usize,
     /// Advances every tick; animates working sessions.
     ticks: u32,
     /// Status on the Base LED, whether a flash is lit and when it toggles next.
@@ -171,6 +177,7 @@ impl Controller {
             statuses: HashMap::new(),
             desktop: Default::default(),
             reports: 0,
+            session_offset: 0,
             ticks: 0,
             shown_status: None,
             blink_on: true,
@@ -264,8 +271,18 @@ impl Controller {
                         let old = self.statuses.get(&source);
                         let first = old.map(|r| r.first).unwrap_or(self.reports);
                         let status = reported_status(old.map(|r| r.status), status, background);
+                        let changed = old.filter(|r| r.status == status).map_or(self.reports, |r| r.changed);
                         self.reports += 1;
-                        let r = Reporter { status, pid, first, file, discovered: false, remote: false, reported: Instant::now() };
+                        let r = Reporter {
+                            status,
+                            pid,
+                            first,
+                            changed,
+                            file,
+                            discovered: false,
+                            remote: false,
+                            reported: Instant::now(),
+                        };
                         self.statuses.insert(source, r);
                     }
                     None => {
@@ -361,6 +378,7 @@ impl Controller {
         }
         self.profile = index;
         self.page = 0;
+        self.session_offset = 0;
         self.folders.clear();
         self.anims.clear();
         let serials: Vec<String> = self.modules.keys().cloned().collect();
@@ -421,7 +439,12 @@ impl Controller {
                 }
                 return true;
             }
-            Action::Cmd(_) | Action::Keys(_) | Action::Volume(_) | Action::Mute(_) | Action::Session(_) => return false,
+            Action::Cmd(_)
+            | Action::Keys(_)
+            | Action::Volume(_)
+            | Action::Mute(_)
+            | Action::Session(_)
+            | Action::Sessions(_) => return false,
         }
         self.anims.clear();
         self.refresh_all();
@@ -548,8 +571,7 @@ impl Controller {
                 let idle = r.file.as_ref().is_some_and(|f| f.status.as_deref() == Some("idle"));
                 if waited_too_long(r.status, idle, r.reported.elapsed()) {
                     log::info!("status {source}: idle and silent for {BACKGROUND_TIMEOUT:?}, ready");
-                    r.status = Status::Ready;
-                    changed = true;
+                    changed |= r.set(Status::Ready, &mut self.reports);
                 }
             }
         }
@@ -558,8 +580,7 @@ impl Controller {
             match self.statuses.get_mut(&source) {
                 Some(r) if !r.discovered => {}
                 Some(r) => {
-                    changed |= r.status != file.status();
-                    r.status = file.status();
+                    changed |= r.set(file.status(), &mut self.reports);
                     r.file = Some(file);
                 }
                 None => {
@@ -568,6 +589,7 @@ impl Controller {
                         status: file.status(),
                         pid: Some(pid),
                         first: self.reports,
+                        changed: self.reports,
                         file: Some(file),
                         discovered: true,
                         remote: false,
@@ -594,8 +616,7 @@ impl Controller {
                 // Its hooks reach this service after all.
                 Some(r) if !r.remote => {}
                 Some(r) => {
-                    changed |= r.status != s.status || r.file.as_ref() != Some(&s.file);
-                    r.status = s.status;
+                    changed |= r.set(s.status, &mut self.reports) || r.file.as_ref() != Some(&s.file);
                     r.file = Some(s.file.clone());
                 }
                 None => {
@@ -604,6 +625,7 @@ impl Controller {
                         status: s.status,
                         pid: None,
                         first: self.reports,
+                        changed: self.reports,
                         file: Some(s.file.clone()),
                         discovered: true,
                         remote: true,
@@ -622,17 +644,28 @@ impl Controller {
 
     // ───────────────────────────── Claude Code sessions ─────────────────────────────
 
-    /// Open Claude Code sessions in slot order: oldest first, so keys don't move around.
+    /// Open Claude Code sessions in the configured order (`[status] sort`).
     fn sessions(&self) -> Vec<&Reporter> {
         let mut v: Vec<&Reporter> =
             self.statuses.iter().filter(|(source, _)| source.starts_with("claude:")).map(|(_, r)| r).collect();
-        v.sort_by_key(|r| (r.file.as_ref().and_then(|f| f.started_at).unwrap_or(u64::MAX), r.first));
+        sort_sessions(&mut v, self.config.status.sort);
         v
     }
 
+    /// How many session keys are on screen: one past the highest slot shown, 0 with none.
+    fn session_slots(&self) -> usize {
+        let slots = self.visible_widgets().into_iter().filter_map(|w| match w {
+            Widget::ClaudeSession { slot } => Some(usize::from(slot) + 1),
+            _ => None,
+        });
+        slots.max().unwrap_or(0)
+    }
+
     /// What a session key shows; `None` for an empty slot.
-    fn session_live(&self, slot: u8) -> Option<LiveData> {
-        let r = *self.sessions().get(slot as usize)?;
+    fn session_live(&self, slot: u8, slots: usize) -> Option<LiveData> {
+        let sessions = self.sessions();
+        let offset = page_start(self.session_offset, sessions.len(), slots);
+        let r = *sessions.get(offset + usize::from(slot))?;
         let c = &self.config.status;
         let (color, frame) = match r.status {
             Status::Attention => (c.attention, u32::from(!self.blink_on)),
@@ -640,7 +673,16 @@ impl Controller {
             Status::Working => (c.working, self.ticks),
         };
         let name = r.file.as_ref().and_then(SessionFile::title).unwrap_or_else(|| "Claude".to_owned());
-        Some(LiveData::Session { name, status: r.status, color: color.0, frame })
+        // Arrows on the first and last key when sessions are scrolled off; in the attention
+        // colour when one of those waits for you.
+        let arrow = |off: &[&Reporter]| {
+            let urgent = off.iter().any(|r| r.status == Status::Attention);
+            (!off.is_empty()).then_some(if urgent { c.attention.0 } else { Rgb::new(0xff, 0xff, 0xff) })
+        };
+        let above = if slot == 0 { arrow(&sessions[..offset]) } else { None };
+        let last = usize::from(slot) + 1 == slots;
+        let below = if last { arrow(&sessions[(offset + slots).min(sessions.len())..]) } else { None };
+        Some(LiveData::Session { name, status: r.status, color: color.0, frame, above, below })
     }
 
     /// Redraw session keys after a status change or a flash, if any are on screen.
@@ -650,23 +692,42 @@ impl Controller {
         if slots.is_empty() {
             return;
         }
+        let count = self.session_slots();
         for w in slots {
-            self.set_session_live(w);
+            self.set_session_live(w, count);
         }
         self.refresh_all();
     }
 
-    fn set_session_live(&mut self, w: Widget) {
+    /// `slots`: [`Self::session_slots`].
+    fn set_session_live(&mut self, w: Widget, slots: usize) {
         let Widget::ClaudeSession { slot } = w else { return };
-        match self.session_live(slot) {
+        match self.session_live(slot, slots) {
             Some(live) => self.live.insert(w, live),
             None => self.live.remove(&w),
         };
     }
 
+    /// Scroll the session keys a page `next` or `prev`, stopping at either end.
+    fn scroll_sessions(&mut self, dir: &str) {
+        let (total, slots) = (self.sessions().len(), self.session_slots());
+        let offset = page_start(self.session_offset, total, slots);
+        let to = match dir {
+            "prev" => offset.saturating_sub(slots),
+            _ => page_start(offset + slots, total, slots),
+        };
+        if to != self.session_offset {
+            log::debug!("sessions {}..{} of {total}", to + 1, (to + slots).min(total));
+            self.session_offset = to;
+            self.refresh_sessions();
+        }
+    }
+
     /// Bring up the session in `slot`, off the controller thread.
     fn bring_up(&self, slot: u8) {
-        let Some(r) = self.sessions().get(slot as usize).copied() else { return };
+        let sessions = self.sessions();
+        let offset = page_start(self.session_offset, sessions.len(), self.session_slots());
+        let Some(r) = sessions.get(offset + usize::from(slot)).copied() else { return };
         let (pid, file) = (r.pid, r.file.clone());
         std::thread::spawn(move || crate::claude::bring_up(pid, file.as_ref()));
     }
@@ -797,8 +858,9 @@ impl Controller {
     fn sample_widgets(&mut self) {
         let needed = self.visible_widgets();
         self.live = self.stats.sample(&needed);
+        let slots = self.session_slots();
         for w in needed {
-            self.set_session_live(w);
+            self.set_session_live(w, slots);
         }
     }
 
@@ -883,9 +945,16 @@ impl Controller {
             };
             self.events.send(Event::Input(msg));
             if let Some(action) = self.binding(control, index, event) {
-                if let Action::Session(slot) = action {
-                    self.bring_up(slot);
-                    continue;
+                match &action {
+                    Action::Session(slot) => {
+                        self.bring_up(*slot);
+                        continue;
+                    }
+                    Action::Sessions(dir) => {
+                        self.scroll_sessions(dir);
+                        continue;
+                    }
+                    _ => {}
                 }
                 let coalesce = (control == "fader").then(|| format!("{serial}/fader{index}"));
                 if !self.navigate(&action) {
@@ -928,8 +997,14 @@ impl Controller {
             }
             "roller" => {
                 let side = if index == 0 { Side::Left } else { Side::Right };
-                let r = p.rollers.iter().find(|r| r.side == side)?;
-                if event == "away" { r.away.clone() } else { r.toward.clone() }
+                match p.rollers.iter().find(|r| r.side == side) {
+                    Some(r) => if event == "away" { r.away.clone() } else { r.toward.clone() },
+                    // Unbound, the left roller scrolls the session keys on screen.
+                    None if side == Side::Left && self.session_slots() > 0 => {
+                        Some(Action::Sessions(if event == "away" { "prev" } else { "next" }.into()))
+                    }
+                    None => None,
+                }
             }
             _ => None,
         }
@@ -1028,6 +1103,44 @@ fn back_target(current: usize, previous: Option<usize>, app: usize, profiles: us
     [previous, Some(app), Some(0)].into_iter().flatten().find(|&i| i != current && i < profiles)
 }
 
+impl Reporter {
+    /// Set the status; whether it changed. `seq` stamps the change (`Controller::reports`).
+    fn set(&mut self, status: Status, seq: &mut u64) -> bool {
+        if self.status == status {
+            return false;
+        }
+        self.status = status;
+        self.changed = *seq;
+        *seq += 1;
+        true
+    }
+
+    /// Start order: when Claude Code started it, then when it first reported.
+    fn started(&self) -> (u64, u64) {
+        (self.file.as_ref().and_then(|f| f.started_at).unwrap_or(u64::MAX), self.first)
+    }
+}
+
+/// Put sessions in slot order. `started` keeps keys in place as sessions come and go; the
+/// others put recent changes, or sessions waiting for you, first.
+fn sort_sessions(v: &mut [&Reporter], sort: SessionSort) {
+    match sort {
+        SessionSort::Started => v.sort_by_key(|r| r.started()),
+        SessionSort::Changed => v.sort_by_key(|r| (Reverse(r.changed), r.started())),
+        // `Status` is ordered by urgency.
+        SessionSort::Urgent => v.sort_by_key(|r| (Reverse(r.status), Reverse(r.changed), r.started())),
+    }
+}
+
+/// The first session on the page that holds `offset`, with `slots` keys a page; on the last
+/// page when sessions have gone since.
+fn page_start(offset: usize, total: usize, slots: usize) -> usize {
+    if slots == 0 {
+        return 0;
+    }
+    (offset / slots * slots).min(total.saturating_sub(1) / slots * slots)
+}
+
 fn mtime(path: &std::path::Path) -> Option<SystemTime> {
     std::fs::metadata(path).and_then(|m| m.modified()).ok()
 }
@@ -1071,6 +1184,52 @@ mod tests {
         assert!(!waited_too_long(Status::Working, false, long));
         assert!(!waited_too_long(Status::Attention, true, long));
         assert!(!waited_too_long(Status::Ready, true, long));
+    }
+
+    fn session(status: Status, started: u64, changed: u64) -> Reporter {
+        let file = SessionFile { started_at: Some(started), ..Default::default() };
+        let (discovered, remote, reported) = (false, false, Instant::now());
+        Reporter { status, pid: None, first: 0, changed, file: Some(file), discovered, remote, reported }
+    }
+
+    #[test]
+    fn sorts_sessions() {
+        use Status::*;
+        let all = [session(Working, 1, 5), session(Attention, 2, 1), session(Ready, 3, 3), session(Attention, 4, 4)];
+        let order = |sort| {
+            let mut v: Vec<&Reporter> = all.iter().collect();
+            sort_sessions(&mut v, sort);
+            v.iter().map(|r| r.started().0).collect::<Vec<_>>()
+        };
+        assert_eq!(order(SessionSort::Started), [1, 2, 3, 4]);
+        assert_eq!(order(SessionSort::Changed), [1, 4, 3, 2]);
+        // Waiting for you first, the most recent first within a status.
+        assert_eq!(order(SessionSort::Urgent), [4, 2, 3, 1]);
+    }
+
+    #[test]
+    fn status_changes_are_stamped() {
+        let mut r = session(Status::Working, 1, 0);
+        let mut seq = 7;
+        assert!(!r.set(Status::Working, &mut seq));
+        assert_eq!((r.changed, seq), (0, 7));
+        assert!(r.set(Status::Ready, &mut seq));
+        assert_eq!((r.status, r.changed, seq), (Status::Ready, 7, 8));
+    }
+
+    #[test]
+    fn session_pages() {
+        // 13 keys a page.
+        assert_eq!(page_start(0, 30, 13), 0);
+        assert_eq!(page_start(13, 30, 13), 13);
+        assert_eq!(page_start(26, 30, 13), 26);
+        // Past the end (sessions closed): the last page.
+        assert_eq!(page_start(39, 30, 13), 26);
+        assert_eq!(page_start(13, 13, 13), 0);
+        assert_eq!(page_start(13, 0, 13), 0);
+        // Fewer keys on this page than where the offset came from: the page that holds it.
+        assert_eq!(page_start(13, 30, 5), 10);
+        assert_eq!(page_start(5, 30, 0), 0);
     }
 
     #[test]

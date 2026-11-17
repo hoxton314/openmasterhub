@@ -11,7 +11,8 @@ export type Action =
   | { profile: string }
   | { volume: string | ({ level: string } & AudioTarget) } // "+2", "-2", "40" or "{value}"
   | { mute: Mute | ({ state: Mute } & AudioTarget) }
-  | { session: number }; // slot of a Claude Code session
+  | { session: number } // slot of a Claude Code session
+  | { sessions: 'next' | 'prev' }; // scroll the Claude Code session keys a page
 
 export type Mute = 'toggle' | 'on' | 'off';
 
@@ -108,6 +109,8 @@ export interface StatusLeds {
   attention?: Color;
   ready?: Color;
   working?: Color;
+  /** Order of the session keys. */
+  sort?: 'started' | 'changed' | 'urgent';
 }
 
 export interface Profile {

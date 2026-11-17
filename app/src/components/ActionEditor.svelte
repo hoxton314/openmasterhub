@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { ArrowLeft, ArrowRight, Ban, Bot, ChevronDown, CornerUpLeft, Folder, Keyboard, LayoutGrid, Terminal, UserRound, Volume2, VolumeX } from 'lucide-svelte';
+  import { ArrowLeft, ArrowRight, ArrowUpDown, Ban, Bot, ChevronDown, CornerUpLeft, Folder, Keyboard, LayoutGrid, Terminal, UserRound, Volume2, VolumeX } from 'lucide-svelte';
   import { invoke } from '../lib/backend';
   import { currentProfile, describe, edit, hub, toast } from '../lib/hub.svelte';
   import { ui } from '../lib/ui.svelte';
@@ -27,6 +27,7 @@
     { k: 'back', label: 'Back', icon: CornerUpLeft },
     { k: 'profile', label: 'Profile', icon: UserRound },
     { k: 'session', label: 'Claude', icon: Bot },
+    { k: 'sessions', label: 'Scroll Claude', icon: ArrowUpDown },
   ] as const;
   /** Claude Code session slots, one per key. */
   const SLOTS = Array.from({ length: 15 }, (_, i) => i);
@@ -56,6 +57,7 @@
     if ('folder' in a) return 'folder';
     if ('back' in a) return 'back';
     if ('session' in a) return 'session';
+    if ('sessions' in a) return 'sessions';
     return 'profile';
   }
   function argOf(a: Action | undefined): string {
@@ -68,6 +70,7 @@
     if ('folder' in a) return a.folder;
     if ('profile' in a) return a.profile;
     if ('session' in a) return String(a.session);
+    if ('sessions' in a) return a.sessions;
     return '';
   }
 
@@ -143,6 +146,7 @@
       case 'back': return { back: true };
       case 'profile': return arg ? { profile: arg } : undefined;
       case 'session': return { session: Number(arg) || 0 };
+      case 'sessions': return { sessions: arg === 'prev' ? 'prev' : 'next' };
       default: return undefined;
     }
   }
@@ -153,6 +157,7 @@
     else if (k === 'volume') arg = fader ? '{value}' : '+2';
     else if (k === 'mute') arg = 'toggle';
     else if (k === 'session') arg = '0';
+    else if (k === 'sessions') arg = 'next';
     else if (k !== 'cmd' && k !== 'keys') arg = '';
     onchange(build());
   }
@@ -315,7 +320,13 @@
         <select class="select" value={arg} onchange={(e) => { arg = e.currentTarget.value; onchange(build()); }}>
           {#each SLOTS as n}<option value={String(n)}>Session {n + 1}</option>{/each}
         </select>
-        <p class="hint">Brings up that Claude Code session: its window, or the session in the Claude app. Sessions are numbered oldest first.</p>
+        <p class="hint">Brings up the Claude Code session on that key: its window, or the session in the Claude app. Sessions fill the keys in the order set by <code>[status] sort</code> (oldest first by default).</p>
+      {:else if kind === 'sessions'}
+        <select class="select" value={arg} onchange={(e) => { arg = e.currentTarget.value; onchange(build()); }}>
+          <option value="next">Next page</option>
+          <option value="prev">Previous page</option>
+        </select>
+        <p class="hint">Scrolls the Claude session keys a page, when more sessions are open than keys. An unbound left roller does this on its own.</p>
       {:else if kind === 'page' || kind === 'folder' || kind === 'profile'}
         <select class="select" value={arg} onchange={(e) => { arg = e.currentTarget.value; onchange(build()); }}>
           {#each names as n}<option value={n}>{n}</option>{/each}
