@@ -7,9 +7,9 @@ On the Base, with several sessions open, the most urgent one wins:
 | Status | Default | When |
 | --- | --- | --- |
 | attention | `#ff4000`, **flashing** | a session waits for you: permission prompt, question, plan approval |
-| ready | `#00ff40` | a session finished its turn and waits for a new prompt |
-| working | `#0060ff` | every session is busy, or waits for its background agents |
-| (none) | your `[leds] base` colour | no Claude Code session is open |
+| ready | `#00ff40` | a session finished its turn and you haven't [checked it](#checked-sessions) yet |
+| working | `#0060ff` | every other session is busy, or waits for its background agents |
+| (none) | your `[leds] base` colour | no Claude Code session is open, or all are finished and checked |
 
 Works on Linux and Windows. The service forgets a session whose `claude` process has exited,
 even if it never sent `SessionEnd`.
@@ -85,15 +85,17 @@ key's background is tinted with the session's status colour and the mascot's pos
 | --- | --- |
 | working | `working` background, mascot typing (animated) |
 | ready | `ready` background, mascot standing |
+| ready, checked | faint `ready` background, faded mascot and name |
 | attention | `attention` background flashing with the Base, mascot waving |
 
-Sessions that wait for you fill the first slots, then ready ones, then working ones; within
-each, the most recent status change comes first. An empty slot shows the key as configured
-(blank, unless you gave it a label). `sort` in `[status]` changes the order:
+Sessions that wait for you fill the first slots, then finished ones you haven't checked, then
+working ones, and finished ones you have checked come last; within each, the most recent status
+change comes first. An empty slot shows the key as configured (blank, unless you gave it a
+label). `sort` in `[status]` changes the order:
 
 | `sort` | Order |
 | --- | --- |
-| `urgent` (default) | waiting for you (permission prompt, question, plan approval) first, then ready, then working; most recent change first within each |
+| `urgent` (default) | waiting for you (permission prompt, question, plan approval), then ready and not checked, then working, then ready and checked; most recent change first within each |
 | `changed` | most recent status change first |
 | `started` | oldest first, so keys don't move around as sessions come and go |
 
@@ -101,6 +103,19 @@ each, the most recent status change comes first. An empty slot shows the key as 
 [status]
 sort = "started"
 ```
+
+### Checked sessions
+
+A finished (ready) session counts as **checked** once you have looked at it after its turn
+ended:
+
+- **Claude desktop app** sessions (local or over SSH): the app showed the session after the
+  turn ended (`lastFocusedAt` after `lastTurnEdgeAt` in its session file).
+- **Any session**: you brought it up from its key on the hub.
+
+A terminal session only counts as checked when you bring it up from the hub: nothing tells the
+service you switched to its window by hand. A checked session stays checked until its status
+changes again; a new prompt makes it working, and the next finished turn makes it unchecked.
 
 ### More sessions than keys
 

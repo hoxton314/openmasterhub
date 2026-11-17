@@ -40,7 +40,9 @@ identical while other platforms are added.
 
 - **Claude Code session keys** (unreleased): `claude_session` widget and `session` action, a
   Claude profile in `examples/config.toml`. `[status] sort` (`urgent` by default, `changed`, `started`)
-  and paging through more sessions than keys with the left roller (`sessions` action).
+  and paging through more sessions than keys with the left roller (`sessions` action). Finished
+  sessions you have checked (focused in the desktop app, or brought up from the hub) are faded,
+  sorted last and leave the Base LED.
   Which physical roller reports as "left" is still unverified (see below). Bringing up terminal sessions on Windows
   (`SetForegroundWindow`) is untested.
 

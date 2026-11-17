@@ -58,8 +58,8 @@ brightness = 100
 attention = "#ff4000"   # a session waits for your answer: flashes
 ready = "#00ff40"       # finished, waiting for a new prompt
 working = "#0060ff"
-# Order of the session keys: "urgent" (the default: waiting for you, then ready, then working;
-# most recent change first within each), "changed" (most recent status change first) or
+# Order of the session keys: "urgent" (the default: waiting for you, then finished and not
+# checked yet, then working, then finished and checked; most recent change first within each), "changed" (most recent status change first) or
 # "started" (oldest first, so keys don't move around).
 # sort = "started"
 

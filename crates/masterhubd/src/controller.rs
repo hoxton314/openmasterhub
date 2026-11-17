@@ -21,6 +21,7 @@ use masterhub_proto::{
 
 use crate::actions::Request;
 use crate::claude::SessionFile;
+use crate::claude::desktop::View;
 use crate::ipc::Broadcaster;
 use crate::hid::ModuleInfo;
 use crate::stats::Stats;
@@ -77,6 +78,12 @@ struct Reporter {
     first: u64,
     /// When its status last changed, in `Controller::reports`.
     changed: u64,
+    /// When its status last changed, in milliseconds since the epoch.
+    changed_at: u64,
+    /// When the Claude desktop app last showed it, for sessions of the app.
+    view: Option<View>,
+    /// When its key on the hub was last pressed, in milliseconds since the epoch (0: never).
+    pressed: u64,
     /// What Claude Code wrote about the session, re-read every tick (the name changes).
     file: Option<SessionFile>,
     /// Found in the session files rather than reported by a hook; its status follows the file
@@ -268,21 +275,11 @@ impl Controller {
                 match status {
                     Some(status) => {
                         let file = pid.filter(|_| source.starts_with("claude:")).and_then(SessionFile::of);
-                        let old = self.statuses.get(&source);
-                        let first = old.map(|r| r.first).unwrap_or(self.reports);
-                        let status = reported_status(old.map(|r| r.status), status, background);
-                        let changed = old.filter(|r| r.status == status).map_or(self.reports, |r| r.changed);
-                        self.reports += 1;
-                        let r = Reporter {
-                            status,
-                            pid,
-                            first,
-                            changed,
-                            file,
-                            discovered: false,
-                            remote: false,
-                            reported: Instant::now(),
-                        };
+                        let old = self.statuses.remove(&source);
+                        let status = reported_status(old.as_ref().map(|r| r.status), status, background);
+                        let mut r = old.unwrap_or_else(|| Reporter::new(status, pid, None, &mut self.reports));
+                        r.set(status, &mut self.reports);
+                        (r.pid, r.file, r.discovered, r.remote, r.reported) = (pid, file, false, false, Instant::now());
                         self.statuses.insert(source, r);
                     }
                     None => {
@@ -518,11 +515,12 @@ impl Controller {
     /// needs attention (the Base and session keys flash together).
     fn update_status(&mut self) {
         let attention = self.statuses.values().any(|r| r.status == Status::Attention);
+        // A finished session you have checked needs nothing from you.
         if attention != self.blink_due.is_some() {
             self.blink_on = true;
             self.blink_due = attention.then(|| Instant::now() + BLINK);
         }
-        let top = if self.config.status.enabled { self.statuses.values().map(|r| r.status).max() } else { None };
+        let top = if self.config.status.enabled { self.statuses.values().filter(|r| !r.checked()).map(|r| r.status).max() } else { None };
         if top == self.shown_status {
             return;
         }
@@ -585,23 +583,27 @@ impl Controller {
                 }
                 None => {
                     log::info!("found Claude Code session {source} (pid {pid})");
-                    let r = Reporter {
-                        status: file.status(),
-                        pid: Some(pid),
-                        first: self.reports,
-                        changed: self.reports,
-                        file: Some(file),
-                        discovered: true,
-                        remote: false,
-                        reported: Instant::now(),
-                    };
-                    self.reports += 1;
+                    let mut r = Reporter::new(file.status(), Some(pid), Some(file), &mut self.reports);
+                    r.discovered = true;
                     self.statuses.insert(source, r);
                     changed = true;
                 }
             }
         }
         changed |= self.follow_remote_sessions();
+        // Sessions of the desktop app count as checked once it has shown them.
+        let views = self.desktop.views();
+        for (source, r) in &mut self.statuses {
+            let view = source.strip_prefix("claude:").and_then(|id| views.get(id)).copied();
+            if r.view != view {
+                let was = r.checked();
+                r.view = view;
+                if r.checked() != was {
+                    log::info!("status {source}: {}", if was { "not checked" } else { "checked" });
+                    changed = true;
+                }
+            }
+        }
         if changed {
             self.update_status();
         }
@@ -621,17 +623,8 @@ impl Controller {
                 }
                 None => {
                     log::info!("found remote Claude Code session {} ({})", s.source, s.file.title().unwrap_or_default());
-                    let r = Reporter {
-                        status: s.status,
-                        pid: None,
-                        first: self.reports,
-                        changed: self.reports,
-                        file: Some(s.file.clone()),
-                        discovered: true,
-                        remote: true,
-                        reported: Instant::now(),
-                    };
-                    self.reports += 1;
+                    let mut r = Reporter::new(s.status, None, Some(s.file.clone()), &mut self.reports);
+                    (r.discovered, r.remote) = (true, true);
                     self.statuses.insert(s.source.clone(), r);
                     changed = true;
                 }
@@ -682,7 +675,7 @@ impl Controller {
         let above = if slot == 0 { arrow(&sessions[..offset]) } else { None };
         let last = usize::from(slot) + 1 == slots;
         let below = if last { arrow(&sessions[(offset + slots).min(sessions.len())..]) } else { None };
-        Some(LiveData::Session { name, status: r.status, color: color.0, frame, above, below })
+        Some(LiveData::Session { name, status: r.status, color: color.0, frame, checked: r.checked(), above, below })
     }
 
     /// Redraw session keys after a status change or a flash, if any are on screen.
@@ -723,13 +716,19 @@ impl Controller {
         }
     }
 
-    /// Bring up the session in `slot`, off the controller thread.
-    fn bring_up(&self, slot: u8) {
+    /// Bring up the session in `slot`, off the controller thread; that checks it.
+    fn bring_up(&mut self, slot: u8) {
         let sessions = self.sessions();
         let offset = page_start(self.session_offset, sessions.len(), self.session_slots());
         let Some(r) = sessions.get(offset + usize::from(slot)).copied() else { return };
         let (pid, file) = (r.pid, r.file.clone());
+        let source = self.statuses.iter().find(|(_, x)| std::ptr::eq(*x, r)).map(|(s, _)| s.clone());
         std::thread::spawn(move || crate::claude::bring_up(pid, file.as_ref()));
+        if let Some(r) = source.and_then(|s| self.statuses.get_mut(&s)) {
+            r.pressed = now_ms();
+            self.update_status();
+            self.refresh_sessions();
+        }
     }
 
     fn base_serial(&self) -> Option<String> {
@@ -1104,6 +1103,25 @@ fn back_target(current: usize, previous: Option<usize>, app: usize, profiles: us
 }
 
 impl Reporter {
+    /// A new source; `seq` is `Controller::reports`.
+    fn new(status: Status, pid: Option<u32>, file: Option<SessionFile>, seq: &mut u64) -> Self {
+        let r = Self {
+            status,
+            pid,
+            first: *seq,
+            changed: *seq,
+            changed_at: now_ms(),
+            view: None,
+            pressed: 0,
+            file,
+            discovered: false,
+            remote: false,
+            reported: Instant::now(),
+        };
+        *seq += 1;
+        r
+    }
+
     /// Set the status; whether it changed. `seq` stamps the change (`Controller::reports`).
     fn set(&mut self, status: Status, seq: &mut u64) -> bool {
         if self.status == status {
@@ -1111,8 +1129,30 @@ impl Reporter {
         }
         self.status = status;
         self.changed = *seq;
+        self.changed_at = now_ms();
         *seq += 1;
         true
+    }
+
+    /// Ready, and you have looked at it since its turn ended: in the desktop app, or by
+    /// bringing it up from its key.
+    fn checked(&self) -> bool {
+        if self.status != Status::Ready {
+            return false;
+        }
+        let ended = self.view.and_then(|v| v.turn_ended).unwrap_or(self.changed_at);
+        self.view.map_or(0, |v| v.focused).max(self.pressed) >= ended
+    }
+
+    /// Group in the `urgent` order: waiting for you, finished and not checked yet, working,
+    /// finished and checked.
+    fn urgency(&self) -> u8 {
+        match self.status {
+            Status::Attention => 0,
+            Status::Ready if !self.checked() => 1,
+            Status::Working => 2,
+            Status::Ready => 3,
+        }
     }
 
     /// Start order: when Claude Code started it, then when it first reported.
@@ -1128,7 +1168,7 @@ fn sort_sessions(v: &mut [&Reporter], sort: SessionSort) {
         SessionSort::Started => v.sort_by_key(|r| r.started()),
         SessionSort::Changed => v.sort_by_key(|r| (Reverse(r.changed), r.started())),
         // `Status` is ordered by urgency.
-        SessionSort::Urgent => v.sort_by_key(|r| (Reverse(r.status), Reverse(r.changed), r.started())),
+        SessionSort::Urgent => v.sort_by_key(|r| (r.urgency(), Reverse(r.changed), r.started())),
     }
 }
 
@@ -1139,6 +1179,10 @@ fn page_start(offset: usize, total: usize, slots: usize) -> usize {
         return 0;
     }
     (offset / slots * slots).min(total.saturating_sub(1) / slots * slots)
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
 fn mtime(path: &std::path::Path) -> Option<SystemTime> {
@@ -1188,8 +1232,9 @@ mod tests {
 
     fn session(status: Status, started: u64, changed: u64) -> Reporter {
         let file = SessionFile { started_at: Some(started), ..Default::default() };
-        let (discovered, remote, reported) = (false, false, Instant::now());
-        Reporter { status, pid: None, first: 0, changed, file: Some(file), discovered, remote, reported }
+        let mut r = Reporter::new(status, None, Some(file), &mut 0);
+        r.changed = changed;
+        r
     }
 
     #[test]
@@ -1205,6 +1250,30 @@ mod tests {
         assert_eq!(order(SessionSort::Changed), [1, 4, 3, 2]);
         // Waiting for you first, the most recent first within a status.
         assert_eq!(order(SessionSort::Urgent), [4, 2, 3, 1]);
+    }
+
+    #[test]
+    fn checked_sessions_go_last() {
+        use Status::*;
+        let at = |status, started, changed, view: Option<View>, pressed| {
+            let mut r = session(status, started, changed);
+            (r.changed_at, r.view, r.pressed) = (1000, view, pressed);
+            r
+        };
+        let focused = |focused, turn_ended| Some(View { focused, turn_ended: Some(turn_ended) });
+        let all = [
+            at(Ready, 1, 9, focused(2000, 1500), 0), // looked at in the app after it finished
+            at(Ready, 2, 8, focused(1200, 1500), 0), // finished after you last looked
+            at(Working, 3, 7, None, 0),
+            at(Ready, 4, 6, None, 1500),             // brought up from its key
+            at(Ready, 5, 5, None, 0),                // terminal session, never brought up
+            at(Attention, 6, 4, focused(9000, 1), 0), // waiting for you, whatever you saw
+        ];
+        let checked: Vec<bool> = all.iter().map(Reporter::checked).collect();
+        assert_eq!(checked, [true, false, false, true, false, false]);
+        let mut v: Vec<&Reporter> = all.iter().collect();
+        sort_sessions(&mut v, SessionSort::Urgent);
+        assert_eq!(v.iter().map(|r| r.started().0).collect::<Vec<_>>(), [6, 2, 5, 3, 1, 4]);
     }
 
     #[test]

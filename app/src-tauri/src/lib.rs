@@ -105,6 +105,7 @@ fn preview_face(state: State<AppState>, face: Face) -> Result<String, String> {
             status: Status::Ready,
             color: config::StatusLeds::default().ready.0,
             frame: 0,
+            checked: false,
             above: None,
             below: None,
         },
