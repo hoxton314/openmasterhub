@@ -20,7 +20,8 @@ pub fn spawn(controller: Sender<Msg>) {
                 match instance_dir() {
                     Some(dir) => {
                         warned = false;
-                        if let Some(class) = active_class(&dir) {
+                        if let Some((class, title)) = active_class(&dir) {
+                            let _ = controller.send(Msg::ActiveTitle(title));
                             let _ = controller.send(Msg::ActiveApp(class));
                         }
                         if let Err(e) = watch(&dir, &controller) {
@@ -67,19 +68,21 @@ fn watch(dir: &std::path::Path, controller: &Sender<Msg>) -> std::io::Result<()>
     log::info!("following focused window via Hyprland");
     for line in BufReader::new(stream).lines() {
         let line = line?;
-        if let Some(class) = parse_active_window(&line)
-            && controller.send(Msg::ActiveApp(class.to_owned())).is_err()
-        {
-            return Ok(());
+        if let Some((class, title)) = parse_active_window(&line) {
+            let _ = controller.send(Msg::ActiveTitle(title.to_owned()));
+            if controller.send(Msg::ActiveApp(class.to_owned())).is_err() {
+                return Ok(());
+            }
         }
     }
     Ok(())
 }
 
-/// `activewindow>>kitty,~/src` → `kitty`. An empty class (desktop focused) is reported too.
-fn parse_active_window(line: &str) -> Option<&str> {
+/// `activewindow>>kitty,~/src` → (`kitty`, `~/src`). An empty class (desktop focused) is
+/// reported too. Titles may hold commas; classes do not.
+fn parse_active_window(line: &str) -> Option<(&str, &str)> {
     let rest = line.strip_prefix("activewindow>>")?;
-    Some(rest.split_once(',').map_or(rest, |(class, _)| class))
+    Some(rest.split_once(',').unwrap_or((rest, "")))
 }
 
 /// Send one command to the request socket (what `hyprctl` does) and return the answer.
@@ -93,9 +96,10 @@ fn request(dir: &std::path::Path, command: &str) -> std::io::Result<String> {
 }
 
 /// Ask the request socket for the current window: `j/activewindow` returns JSON.
-fn active_class(dir: &std::path::Path) -> Option<String> {
+fn active_class(dir: &std::path::Path) -> Option<(String, String)> {
     let v: serde_json::Value = serde_json::from_str(&request(dir, "j/activewindow").ok()?).ok()?;
-    v.get("class")?.as_str().map(str::to_owned)
+    let title = v.get("title").and_then(|t| t.as_str()).unwrap_or_default().to_owned();
+    Some((v.get("class")?.as_str()?.to_owned(), title))
 }
 
 /// Classes of all open windows (`j/clients`).
@@ -158,9 +162,9 @@ mod tests {
 
     #[test]
     fn parses_events() {
-        assert_eq!(parse_active_window("activewindow>>kitty,~/src"), Some("kitty"));
-        assert_eq!(parse_active_window("activewindow>>firefox,a, b, c"), Some("firefox"));
-        assert_eq!(parse_active_window("activewindow>>,"), Some(""));
+        assert_eq!(parse_active_window("activewindow>>kitty,~/src"), Some(("kitty", "~/src")));
+        assert_eq!(parse_active_window("activewindow>>firefox,a, b, c"), Some(("firefox", "a, b, c")));
+        assert_eq!(parse_active_window("activewindow>>,"), Some(("", "")));
         assert_eq!(parse_active_window("workspace>>2"), None);
     }
 

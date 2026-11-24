@@ -103,8 +103,16 @@ pub struct Claim {
 }
 
 impl Claim {
-    fn active(&self, app: Option<&str>) -> bool {
-        self.apps.is_empty() || app.is_some_and(|a| self.apps.iter().any(|p| glob_match(p, a)))
+    /// A pattern is a class glob, or `class@title` (both globs) for apps that share a class,
+    /// e.g. games started through one launcher (`steam_app_battlenet@World of Warcraft`).
+    fn active(&self, app: Option<&str>, title: Option<&str>) -> bool {
+        self.apps.is_empty()
+            || app.is_some_and(|a| {
+                self.apps.iter().any(|p| match p.split_once('@') {
+                    Some((class, t)) => glob_match(class, a) && glob_match(t, title.unwrap_or_default()),
+                    None => glob_match(p, a),
+                })
+            })
     }
 }
 
@@ -159,9 +167,9 @@ impl Claims {
         self.owners.iter().filter(|(_, o)| **o == id).map(|(c, _)| *c).collect()
     }
 
-    /// Decide again who owns what for the focused `app`.
-    pub fn recompute(&mut self, app: Option<&str>) -> Changes {
-        let active: BTreeSet<u64> = self.claims.iter().filter(|(_, c)| c.active(app)).map(|(id, _)| *id).collect();
+    /// Decide again who owns what for the focused `app` (window class) and its `title`.
+    pub fn recompute(&mut self, app: Option<&str>, title: Option<&str>) -> Changes {
+        let active: BTreeSet<u64> = self.claims.iter().filter(|(_, c)| c.active(app, title)).map(|(id, _)| *id).collect();
         let mut owners: HashMap<Control, u64> = HashMap::new();
         for &id in &active {
             let claim = &self.claims[&id];
@@ -211,13 +219,13 @@ mod tests {
         let mut c = Claims::default();
         c.insert(1, claim(&[0, 1], &[], 0));
         c.insert(2, claim(&[1, 2], &["cacaw"], 5));
-        let ch = c.recompute(Some("firefox"));
+        let ch = c.recompute(Some("firefox"), None);
         assert_eq!(c.owner(Control::Key(1)), Some(1));
         assert_eq!(c.owner(Control::Key(2)), None);
         assert!(ch.controls.contains(&Control::Key(0)));
         assert!(!c.is_active(2));
 
-        let ch = c.recompute(Some("CACAW"));
+        let ch = c.recompute(Some("CACAW"), None);
         assert_eq!(c.owner(Control::Key(1)), Some(2));
         assert_eq!(c.owner(Control::Key(0)), Some(1));
         assert_eq!(ch.controls, [Control::Key(1), Control::Key(2)].into());
@@ -229,14 +237,14 @@ mod tests {
         let mut c = Claims::default();
         c.insert(1, claim(&[3], &[], 0));
         c.insert(2, claim(&[3], &[], 0));
-        c.recompute(None);
+        c.recompute(None, None);
         assert_eq!(c.owner(Control::Key(3)), Some(2));
         c.remove(2);
-        let ch = c.recompute(None);
+        let ch = c.recompute(None, None);
         assert_eq!(c.owner(Control::Key(3)), Some(1));
         assert_eq!(ch.claims, [1].into());
         c.remove(1);
-        let ch = c.recompute(None);
+        let ch = c.recompute(None, None);
         assert_eq!(c.owner(Control::Key(3)), None);
         assert!(ch.controls.contains(&Control::Key(3)));
         assert!(ch.claims.is_empty());
@@ -246,5 +254,15 @@ mod tests {
     fn controls_round_trip() {
         let c = Controls { keys: vec![0, 4], dial: true, knobs: vec![1], leds: vec![LedZone::Base], ..Default::default() };
         assert_eq!(collect(&expand(&c)), c);
+    }
+
+    #[test]
+    fn class_and_title() {
+        let mut c = Claim { name: "wow".into(), controls: Default::default(), apps: vec!["steam_app_battlenet@World of Warcraft".into()], priority: 5, frames: Default::default(), leds: Default::default() };
+        assert!(c.active(Some("steam_app_battlenet"), Some("World of Warcraft")));
+        assert!(!c.active(Some("steam_app_battlenet"), Some("Battle.net")));
+        assert!(!c.active(Some("kitty"), Some("World of Warcraft")));
+        c.apps = vec!["steam_app_*".into()];
+        assert!(c.active(Some("steam_app_battlenet"), None));
     }
 }

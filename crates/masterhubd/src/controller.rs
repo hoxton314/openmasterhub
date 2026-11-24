@@ -35,6 +35,8 @@ pub enum Msg {
     Disconnected { serial: String },
     Input { serial: String, report: InputReport },
     ActiveApp(String),
+    /// The focused window's title; sent just before its `ActiveApp` (and when it changes).
+    ActiveTitle(String),
     /// A validated config from the app (IPC) (already saved to disk) with its TOML text.
     ApplyConfig { config: Box<Config>, text: String },
     SetProfile(String),
@@ -132,6 +134,7 @@ pub struct Controller {
     /// Last orientation reported by the Base's sensor, if any.
     sensor_horizontal: Option<bool>,
     active_app: Option<String>,
+    active_title: Option<String>,
     anims: HashMap<(String, u8), Anim>,
     stats: Stats,
     live: HashMap<Widget, LiveData>,
@@ -207,6 +210,7 @@ impl Controller {
             folders: Vec::new(),
             sensor_horizontal: None,
             active_app: None,
+            active_title: None,
             anims: HashMap::new(),
             stats: Stats::new(),
             live: HashMap::new(),
@@ -286,6 +290,13 @@ impl Controller {
             }
             Msg::Input { serial, report } => self.input(&serial, report),
             // The GUI's own window: GTK uses the app ID, Tauri the binary name (openmasterhub[.exe]).
+            Msg::ActiveTitle(title) => {
+                let changed = self.active_title.as_deref() != Some(&title);
+                self.active_title = Some(title);
+                if changed {
+                    self.reclaim();
+                }
+            }
             Msg::ActiveApp(class) if class == GUI_APP_ID || class.to_ascii_lowercase().starts_with("openmasterhub") => {}
             Msg::ActiveApp(class) => {
                 let target = self.config.profile_for_app(&class);
@@ -393,7 +404,7 @@ impl Controller {
 
     /// Decide again who owns which control and redraw what changed hands.
     fn reclaim(&mut self) {
-        let changes = self.claims.recompute(self.active_app.as_deref());
+        let changes = self.claims.recompute(self.active_app.as_deref(), self.active_title.as_deref());
         let mut zones = Vec::new();
         for ctl in &changes.controls {
             match *ctl {
