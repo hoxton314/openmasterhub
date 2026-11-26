@@ -143,7 +143,7 @@ fn every_style_renders_and_differs() {
     }
 }
 
-/// `cargo test --release -p pulpit-render -- --ignored --nocapture bench`
+/// `cargo test --release -p masterhub-games-render -- --ignored --nocapture bench`
 #[test]
 #[ignore]
 fn bench_frames() {

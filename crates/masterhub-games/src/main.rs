@@ -12,6 +12,8 @@
 //!   masterhub-games sheet GAME OUT.png            a game's keys as one picture
 //!   masterhub-games --check                       validate the config
 
+// No console window when started at login on Windows; commands attach to the terminal's.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 // A build with only some games leaves parts of the engine unused.
 #![cfg_attr(not(all(feature = "cyberpunk", feature = "deadlock", feature = "wow", feature = "crimson")), allow(dead_code))]
 
@@ -31,7 +33,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 
 fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    init_logging();
     let mut args = std::env::args().skip(1);
     let mut path = config::Config::default_path();
     let mut check = false;
@@ -82,4 +84,26 @@ fn main() -> Result<()> {
     loop {
         std::thread::park();
     }
+}
+
+/// Log to stderr, or on Windows without a console (started at login) to
+/// `%LOCALAPPDATA%\\openmasterhub\\masterhub-games.log` (cut back to empty past 1 MiB).
+fn init_logging() {
+    let mut builder = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+        // SAFETY: plain Win32 call; succeeds when started from a terminal.
+        let has_console = unsafe { AttachConsole(ATTACH_PARENT_PROCESS) } != 0 || cfg!(debug_assertions);
+        if !has_console && let Some(dir) = dirs::data_local_dir().map(|d| d.join("openmasterhub")) {
+            let path = dir.join("masterhub-games.log");
+            let big = std::fs::metadata(&path).is_ok_and(|m| m.len() > 1 << 20);
+            let file = std::fs::create_dir_all(&dir)
+                .and_then(|_| std::fs::OpenOptions::new().create(true).append(!big).write(true).truncate(big).open(&path));
+            if let Ok(file) = file {
+                builder.target(env_logger::Target::Pipe(Box::new(file)));
+            }
+        }
+    }
+    builder.init();
 }

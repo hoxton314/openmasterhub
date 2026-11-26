@@ -15,8 +15,8 @@ pkg=$(ls "$work"/openmasterhub-bin-"${version}"-1-x86_64.pkg.tar.*)
 contents=$(tar -tf "$pkg" | grep -v '^\.' | sort)
 echo "package contents:"
 echo "$contents"
-for f in usr/bin/masterhubd usr/bin/openmasterhub usr/lib/udev/rules.d/70-masterhub.rules \
-         usr/lib/systemd/user/masterhubd.service usr/share/applications/org.openmasterhub.OpenMasterHub.desktop \
+for f in usr/bin/masterhubd usr/bin/openmasterhub usr/bin/masterhub-games usr/lib/udev/rules.d/70-masterhub.rules \
+         usr/lib/systemd/user/masterhubd.service usr/lib/systemd/user/masterhub-games.service usr/share/applications/org.openmasterhub.OpenMasterHub.desktop \
          usr/share/icons/hicolor/256x256/apps/openmasterhub.png; do
   grep -qx "$f" <<<"$contents" || { echo "::error::$f missing from package"; exit 1; }
 done

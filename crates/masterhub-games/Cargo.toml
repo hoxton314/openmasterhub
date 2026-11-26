@@ -3,8 +3,8 @@ name = "masterhub-games"
 description = "Opt-in game modes for the MasterHUB: keys, dial and intro per game, over masterhubd's live surface"
 version.workspace = true
 edition.workspace = true
-# From PULPIT by Dawid Gorczyca, under its original licence.
-license = "MIT OR Apache-2.0"
+# From PULPIT by Dawid Gorczyca (MIT OR Apache-2.0), used under MIT: see LICENSE.
+license = "MIT"
 
 [features]
 # One feature per game; a self-build can leave games out: --no-default-features --features deadlock
@@ -30,4 +30,4 @@ dirs = "6"
 resvg = { version = "0.45", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }

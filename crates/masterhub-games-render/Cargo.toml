@@ -3,8 +3,8 @@ name = "masterhub-games-render"
 description = "Key and dial faces of the OpenMasterHUB game modes"
 version.workspace = true
 edition.workspace = true
-# From PULPIT by Dawid Gorczyca, under its original licence.
-license = "MIT OR Apache-2.0"
+# From PULPIT by Dawid Gorczyca (MIT OR Apache-2.0), used under MIT: see LICENSE.
+license = "MIT"
 
 [dependencies]
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }

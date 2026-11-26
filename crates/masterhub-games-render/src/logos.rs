@@ -1,5 +1,5 @@
-//! App logos (Simple Icons, CC0; trademarks belong to their owners): single-path 24×24 SVGs in
-//! `logos/`, filled like icon glyphs so they take the same colours, glow and pop.
+//! App logos: single-path 24×24 SVGs in `logos/`, filled like icon glyphs. The game modes use
+//! none, so none are bundled (brand marks are not ours to ship); the hook stays for the faces.
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -14,10 +14,7 @@ macro_rules! logos {
     };
 }
 
-logos!(
-    "googlechrome", "blender", "discord", "steam", "obsidian", "godotengine", "spotify", "alacritty", "github",
-    "youtube", "firefoxbrowser", "figma", "krita", "inkscape", "obsstudio", "gimp", "thunderbird",
-);
+logos!();
 
 /// Names of the logos a [`crate::KeyFace`] can use.
 pub fn names() -> Vec<&'static str> {

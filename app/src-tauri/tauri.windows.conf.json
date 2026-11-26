@@ -1,7 +1,7 @@
 {
   "bundle": {
     "targets": ["nsis"],
-    "externalBin": ["binaries/masterhubd"],
+    "externalBin": ["binaries/masterhubd", "binaries/masterhub-games"],
     "windows": {
       "nsis": {
         "installMode": "currentUser",

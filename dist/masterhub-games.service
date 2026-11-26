@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenMasterHUB game modes (opt-in: masterhub-games setup GAME)
+PartOf=graphical-session.target
+After=graphical-session.target masterhubd.service
+Wants=masterhubd.service
+
+[Service]
+ExecStart=/usr/bin/masterhub-games
+# Exits at once when no game is switched on; nothing to restart then.
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,4 +1,5 @@
-//! PULPIT faces: what a key or the dial shows, drawn in the look of `docs/STYLE.md`.
+//! Faces of the game modes (from PULPIT by Dawid Gorczyca): what a key or the dial shows, in
+//! each game's look.
 //!
 //! The app describes a face ([`KeyFace`], [`DialFace`]) and asks the [`Renderer`] for a frame at
 //! time `t` (seconds, drives scrolling text and pulsing orbs) with press intensity `press`
@@ -120,7 +121,7 @@ pub fn press_styles() -> &'static [(PressStyle, &'static str)] {
 pub struct KeyFace {
     /// Top line, the important text. Scrolls when it does not fit.
     pub label: String,
-    /// A glyph from uicons-solid-rounded, e.g. `'\u{f0ac}'` (globe).
+    /// A glyph from Font Awesome Free (solid), e.g. `'\u{f0ac}'` (globe).
     pub icon: Option<char>,
     /// Ground colour (sRGB) for the key's category; plum-deep when `None`.
     pub ground: Option<[u8; 3]>,

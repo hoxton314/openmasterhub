@@ -6,9 +6,18 @@ post_install() {
     Then open "OpenMasterHUB" from your launcher to configure the hub.
     If the keypad or dial keep showing the Cooler Master animation,
     unplug and replug the MasterHUB once.
+
+    Optional game modes (Cyberpunk 2077, Deadlock, WoW Forever, Crimson Desert) are off.
+    To switch one on, run it once per game; it finds the game through Steam
+    (or pass --path), installs its game-side files and reads its look from your copy:
+      masterhub-games list
+      masterhub-games setup deadlock
+      systemctl --user enable --now masterhub-games
+    See /usr/share/doc/openmasterhub/GAME_MODES.md
 EOF
 }
 
 post_upgrade() {
   echo "==> Restart the service to use the new version: systemctl --user restart masterhubd"
+  echo "    (and masterhub-games, if you use game modes)"
 }
