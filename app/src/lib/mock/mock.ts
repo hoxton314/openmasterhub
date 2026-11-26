@@ -1,17 +1,46 @@
-// Browser-only stand-in for the Tauri backend, serving a snapshot of a real hub.
+// Browser-only stand-in for the Tauri backend, serving a snapshot of a real hub (dev builds only).
+//
+// Commands are looked up in the per-area handler files first (handlers/*.ts, one per work
+// package, so areas never edit the same mock file), then in the base commands below.
+// URL switches: `?caps=none` pretends to be an old service without capabilities.
 
 import sample from './snapshot.json';
-import type { GamePlan, GameStatus, Face, Snapshot } from '../types';
+import type { Face, Snapshot } from '../types';
+import type { UserThemeFile } from '../theme/theme.svelte';
+import * as editor from './handlers/editor';
+import * as global from './handlers/global';
+import * as inspector from './handlers/inspector';
+import * as library from './handlers/library';
+import * as profiles from './handlers/profiles';
+import * as setups from './handlers/setups';
+import * as system from './handlers/system';
 
 type Handler = (e: { payload: unknown }) => void;
-const handlers: Record<string, Handler[]> = {};
-const emit = (event: string, payload: unknown) => (handlers[event] ?? []).forEach((h) => h({ payload }));
+
+/** What a handler gets besides the command's arguments. */
+export interface MockContext {
+  snapshot: Snapshot;
+  emit: (event: string, payload: unknown) => void;
+}
+export type MockCommand = (args: Record<string, unknown> | undefined, ctx: MockContext) => unknown;
+export type MockHandlers = Record<string, MockCommand>;
+
+const listeners: Record<string, Handler[]> = {};
+const emit = (event: string, payload: unknown) => (listeners[event] ?? []).forEach((h) => h({ payload }));
 // A git-ignored `snapshot.local.json` (e.g. your own config) replaces the sample when present.
 const local = Object.values(import.meta.glob('./snapshot.local.json', { eager: true, import: 'default' }))[0];
 const snapshot = structuredClone(local ?? sample) as unknown as Snapshot;
 
+/** Every capability, so design work sees every control; `?caps=none` hides them. */
+const ALL_CAPABILITIES = ['setups', 'base', 'hold', 'long_press', 'setup_action', 'profile_cycle', 'pin', 'except_setups', 'blink_on_setup', 'knob_volume', 'face_fit', 'widget_refresh', 'identify', 'needs_replug', 'system_info', 'preview_profile', 'release_claim', 'claim_details'];
+const params = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
+snapshot.capabilities = params.get('caps') === 'none' ? [] : (snapshot.capabilities ?? ALL_CAPABILITIES);
+
+const ctx: MockContext = { snapshot, emit };
+const areas: MockHandlers[] = [editor, inspector, setups, profiles, library, global, system].map((m) => m.handlers);
+
 export function listen(event: string, handler: Handler) {
-  (handlers[event] ??= []).push(handler);
+  (listeners[event] ??= []).push(handler);
 }
 
 /** A rough browser rendering of a key face, standing in for the Rust renderer. */
@@ -30,92 +59,77 @@ function preview(face: Face): string {
   return c.toDataURL();
 }
 
-export async function invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
+/** Example user themes from `<config dir>/themes/`: one valid, one rejected (it tries `url(`). */
+const userThemes: UserThemeFile[] = [
+  {
+    file: 'orchid.json',
+    json: JSON.stringify({
+      $schema: './theme.schema.json',
+      schemaVersion: 1,
+      id: 'orchid',
+      name: 'Orchid',
+      author: 'Example',
+      description: 'Dark, with a pink accent: a two-colour user theme.',
+      appearance: 'dark',
+      inherits: 'dark',
+      tokens: { color: { accent: '#F07FD0', accentFill: '#C2459F' } },
+    }),
+  },
+  {
+    file: 'broken.json',
+    json: JSON.stringify({ schemaVersion: 1, id: 'broken', name: 'Broken', appearance: 'dark', inherits: 'dark', tokens: { color: { bg: "url('https://example.com/bg.png')" } } }),
+  },
+];
+
+async function base(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
   switch (cmd) {
     case 'snapshot':
       return snapshot;
     case 'save_config':
+      snapshot.config = args?.config as Snapshot['config'];
       console.info('[mock] save_config', args?.config);
       return;
     case 'set_profile':
-      snapshot.state!.profile = args?.name as string;
-      emit('hub:state', { ...snapshot.state, page: '' });
+      snapshot.state = { ...snapshot.state!, profile: args?.name as string, page: '', reason: { kind: 'action' } };
+      emit('hub:state', snapshot.state);
       return;
     case 'show_page':
-      emit('hub:state', { ...snapshot.state, page: args?.name });
+      snapshot.state = { ...snapshot.state!, page: args?.name as string };
+      emit('hub:state', snapshot.state);
+      return;
+    case 'set_setup':
+      snapshot.state = { ...snapshot.state!, setup: args?.name as string };
+      emit('hub:state', snapshot.state);
       return;
     case 'preview_face':
       return preview(args?.face as Face);
     case 'open_window_classes':
-      return ['firefox', 'com.mitchellh.ghostty', 'obs', 'steam', 'code-oss'];
+      return ['firefox', 'com.mitchellh.ghostty', 'obs', 'steam', 'code-oss', 'blender'];
     case 'audio_info':
       return { apps: ['Discord', 'firefox', 'spotify'], outputs: ['Speakers', 'Headphones'], inputs: ['USB Microphone', 'Webcam'] };
-    case 'games_list':
-      return mockGames;
-    case 'games_plan':
-      return mockPlan(args?.game as string, args?.path as string | undefined);
-    case 'games_setup': {
-      await new Promise((r) => setTimeout(r, 1200));
-      const g = mockGames.find((x) => x.game === args?.game);
-      if (g) Object.assign(g, { enabled: true, assets: true, path: (args?.path as string) || g.path });
-      return 'done';
-    }
-    case 'games_disable': {
-      const g = mockGames.find((x) => x.game === args?.game);
-      if (g) g.enabled = false;
+    case 'themes_list':
+      return userThemes;
+    case 'themes_dir':
+      return '/home/you/.config/openmasterhub/themes';
+    case 'start_service':
+    case 'restart_service':
       return;
-    }
     default:
+      console.info('[mock] unhandled command', cmd, args);
       return;
   }
 }
 
-const steam = '/home/you/.local/share/Steam/steamapps/common';
-const mockGames: GameStatus[] = [
-  { game: 'cyberpunk', steam: 1091500, title: 'Cyberpunk 2077', about: 'The game’s binds, a combat page, and through a Cyber Engine Tweaks mod cheats, stats on the dial, favourites and loadouts.', enabled: false, path: `${steam}/Cyberpunk 2077`, assets: true },
-  { game: 'crimson_desert', steam: 3321460, title: 'Crimson Desert', about: 'Menus, quick slots, clips and the community map on the keys. Nothing is installed into the game.', enabled: false, path: null, assets: true },
-  { game: 'deadlock', steam: 1422450, title: 'Deadlock', about: 'Your own binds for the shop, scores, chat and replays, console commands on spare keys, and a page with time, machine and music.', enabled: true, path: `${steam}/Deadlock`, assets: true },
-  { game: 'wow_forever', steam: null, title: 'WoW Forever', about: 'Your binds and bars with cooldowns; an add-on gives XP, gold, zone and fights to the dial.', enabled: false, path: null, assets: false },
-];
-
-function mockPlan(game: string, path?: string): GamePlan {
-  const g = mockGames.find((x) => x.game === game)!;
-  const dir = path || g.path;
-  const plan: GamePlan = { game, title: g.title, path: dir, detected: !path, steps: [], notes: [], error: null };
-  const data = '/home/you/.local/share/openmasterhub/games';
-  if (!dir && game !== 'crimson_desert') {
-    plan.error = `${g.title} was not found through Steam: choose its install folder`;
-    return plan;
-  }
-  if (game === 'cyberpunk') plan.steps.push({ kind: 'cet_bridge', path: `${dir}/bin/x64/plugins/cyber_engine_tweaks/mods/pulpit_bridge` });
-  if (game === 'deadlock') {
-    plan.steps.push({ kind: 'deadlock_cfg', path: `${dir}/game/citadel/cfg` });
-    plan.steps.push({ kind: 'deadlock_icons', from: `${dir}/game/citadel/pak01_dir.vpk`, to: `${data}/deadlock/masks` });
-  }
-  if (game === 'wow_forever') {
-    plan.steps.push({ kind: 'wow_addon', path: `${dir}/Interface/AddOns/PULPIT` });
-    plan.notes.push('WoW’s icons and fonts can’t be extracted yet (Battle.net’s CASC storage): the keys use a stand-in look.');
-  }
-  plan.steps.push({ kind: 'enable' });
-  return plan;
+export async function invoke(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
+  for (const h of areas) if (cmd in h) return h[cmd](args, ctx);
+  return base(cmd, args);
 }
 
 // Simulated input, so the live-feedback design can be judged: press `i` in the browser.
 if (typeof window !== 'undefined') {
   window.addEventListener('keydown', (e) => {
-    if (e.key !== 'i' || (e.target as HTMLElement).tagName === 'INPUT') return;
+    if (e.key !== 'i' || (e.target as HTMLElement).tagName === 'INPUT' || e.ctrlKey || e.metaKey) return;
     const keypad = snapshot.modules.find((m) => m.kind === 'keypad');
     if (keypad) emit('hub:input', { serial: keypad.serial, control: 'key', index: Math.floor(Math.random() * 15), event: 'down' });
   });
-}
-
-// `?game=deadlock` opens that game's setup dialog, for design work on it.
-if (typeof window !== 'undefined') {
-  const open = new URLSearchParams(location.search).get('game');
-  if (open)
-    setTimeout(async () => {
-      const m = await import('../games.svelte');
-      await m.refreshGames();
-      m.games.open = m.games.list.find((g) => g.game === open) ?? null;
-    }, 800);
 }
