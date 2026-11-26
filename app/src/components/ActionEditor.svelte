@@ -63,7 +63,7 @@
   function argOf(a: Action | undefined): string {
     if (!a) return '';
     if ('cmd' in a) return a.cmd;
-    if ('keys' in a) return a.keys;
+    if ('keys' in a) return typeof a.keys === 'string' ? a.keys : a.keys.combo;
     if ('volume' in a) return typeof a.volume === 'string' ? a.volume : a.volume.level;
     if ('mute' in a) return typeof a.mute === 'string' ? a.mute : a.mute.state;
     if ('page' in a) return a.page === 'next' || a.page === 'prev' ? '' : a.page;
