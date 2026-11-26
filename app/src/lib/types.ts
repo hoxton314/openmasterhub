@@ -116,6 +116,8 @@ export interface StatusLeds {
 export interface Profile {
   name: string;
   apps?: string[];
+  /** Listed under Games; unset = when one of `apps` is a Steam game (`steam_app_*`). */
+  game?: boolean;
   leds?: Leds;
   page?: Page[];
   folder?: Page[];
@@ -210,6 +212,8 @@ export interface GameStatus {
   game: string;
   title: string;
   about: string;
+  /** Steam app id: a profile following `steam_app_<id>` is the same game. */
+  steam: number | null;
   enabled: boolean;
   /** The configured or detected install folder. */
   path: string | null;

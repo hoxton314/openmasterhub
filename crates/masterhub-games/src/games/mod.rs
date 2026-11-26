@@ -35,7 +35,7 @@ pub const ALL: &[Info] = &[
     #[cfg(feature = "deadlock")]
     Info { name: "deadlock", title: "Deadlock", about: "Your own binds for the shop, scores, chat and replays, console commands on spare keys, and a page with time, machine and music.", steam: Some(1422450), make: deadlock::game },
     #[cfg(feature = "wow")]
-    Info { name: "wow_forever", title: "World of Warcraft (WoW Forever)", about: "Your binds and bars with cooldowns; an add-on gives XP, gold, zone and fights to the dial.", steam: None, make: wow_forever::game },
+    Info { name: "wow_forever", title: "WoW Forever", about: "Your binds and bars with cooldowns; an add-on gives XP, gold, zone and fights to the dial.", steam: None, make: wow_forever::game },
 ];
 
 /// The CET bridge's folder inside the Cyberpunk install.

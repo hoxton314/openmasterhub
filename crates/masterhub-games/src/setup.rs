@@ -184,6 +184,8 @@ pub struct Status {
     pub game: &'static str,
     pub title: &'static str,
     pub about: &'static str,
+    /// Steam app id, so the app can put the mode next to a profile for the same game.
+    pub steam: Option<u32>,
     pub enabled: bool,
     /// The configured or found install folder.
     pub path: Option<PathBuf>,
@@ -198,6 +200,7 @@ pub fn status(cfg: &Config) -> Vec<Status> {
             game: info.name,
             title: info.title,
             about: info.about,
+            steam: info.steam,
             enabled: cfg.games.get(info.name).is_some_and(|g| g.enabled),
             path: games::install(info, cfg),
             assets: assets_ready(info),

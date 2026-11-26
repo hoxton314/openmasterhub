@@ -1,12 +1,14 @@
 // Browser-only stand-in for the Tauri backend, serving a snapshot of a real hub.
 
-import data from './snapshot.json';
+import sample from './snapshot.json';
 import type { GamePlan, GameStatus, Face, Snapshot } from '../types';
 
 type Handler = (e: { payload: unknown }) => void;
 const handlers: Record<string, Handler[]> = {};
 const emit = (event: string, payload: unknown) => (handlers[event] ?? []).forEach((h) => h({ payload }));
-const snapshot = structuredClone(data) as unknown as Snapshot;
+// A git-ignored `snapshot.local.json` (e.g. your own config) replaces the sample when present.
+const local = Object.values(import.meta.glob('./snapshot.local.json', { eager: true, import: 'default' }))[0];
+const snapshot = structuredClone(local ?? sample) as unknown as Snapshot;
 
 export function listen(event: string, handler: Handler) {
   (handlers[event] ??= []).push(handler);
@@ -70,10 +72,10 @@ export async function invoke(cmd: string, args?: Record<string, unknown>): Promi
 
 const steam = '/home/you/.local/share/Steam/steamapps/common';
 const mockGames: GameStatus[] = [
-  { game: 'cyberpunk', title: 'Cyberpunk 2077', about: 'The game’s binds, a combat page, and through a Cyber Engine Tweaks mod cheats, stats on the dial, favourites and loadouts.', enabled: false, path: `${steam}/Cyberpunk 2077`, assets: true },
-  { game: 'crimson_desert', title: 'Crimson Desert', about: 'Menus, quick slots, clips and the community map on the keys. Nothing is installed into the game.', enabled: false, path: null, assets: true },
-  { game: 'deadlock', title: 'Deadlock', about: 'Your own binds for the shop, scores, chat and replays, console commands on spare keys, and a page with time, machine and music.', enabled: true, path: `${steam}/Deadlock`, assets: true },
-  { game: 'wow_forever', title: 'World of Warcraft (WoW Forever)', about: 'Your binds and bars with cooldowns; an add-on gives XP, gold, zone and fights to the dial.', enabled: false, path: null, assets: false },
+  { game: 'cyberpunk', steam: 1091500, title: 'Cyberpunk 2077', about: 'The game’s binds, a combat page, and through a Cyber Engine Tweaks mod cheats, stats on the dial, favourites and loadouts.', enabled: false, path: `${steam}/Cyberpunk 2077`, assets: true },
+  { game: 'crimson_desert', steam: 3321460, title: 'Crimson Desert', about: 'Menus, quick slots, clips and the community map on the keys. Nothing is installed into the game.', enabled: false, path: null, assets: true },
+  { game: 'deadlock', steam: 1422450, title: 'Deadlock', about: 'Your own binds for the shop, scores, chat and replays, console commands on spare keys, and a page with time, machine and music.', enabled: true, path: `${steam}/Deadlock`, assets: true },
+  { game: 'wow_forever', steam: null, title: 'WoW Forever', about: 'Your binds and bars with cooldowns; an add-on gives XP, gold, zone and fights to the dial.', enabled: false, path: null, assets: false },
 ];
 
 function mockPlan(game: string, path?: string): GamePlan {

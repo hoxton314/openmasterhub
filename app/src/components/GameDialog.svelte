@@ -95,9 +95,11 @@
   const needsFolder = $derived(g?.game !== 'crimson_desert');
 </script>
 
+<svelte:window onkeydown={(e) => g && e.key === 'Escape' && close()} />
+
 {#if g}
   <div class="scrim" role="presentation" onclick={close}>
-    <div class="dialog" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.key === 'Escape' && close()}>
+    <div class="dialog" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
       <div class="head">
         <div class="badge"><Gamepad2 size={18} /></div>
         <div>

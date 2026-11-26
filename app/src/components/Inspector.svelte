@@ -253,6 +253,8 @@
   .scroll {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-gutter: stable;
   }
   .scroll > :global(.group:first-child),
   .group.first {

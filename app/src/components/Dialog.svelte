@@ -22,10 +22,12 @@
   }
 </script>
 
+<svelte:window onkeydown={(e) => ui.dialog && e.key === 'Escape' && close()} />
+
 {#if ui.dialog}
   {@const d = ui.dialog}
   <div class="scrim" role="presentation" onclick={close}>
-    <div class="dialog" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.key === 'Escape' && close()}>
+    <div class="dialog" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
       <h2>{d.title}</h2>
       {#if d.body}<p>{d.body}</p>{/if}
       {#if d.input}

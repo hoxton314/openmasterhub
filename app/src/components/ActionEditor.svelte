@@ -96,6 +96,11 @@
   }
 
   let open = $state(false);
+  let box: HTMLDivElement | undefined = $state();
+  // An opened editor scrolls into view (it grows below the fold in a long inspector).
+  $effect(() => {
+    if (open && box) requestAnimationFrame(() => box?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  });
   // Rebuilt when the selection changes, so the initial value is all it needs.
   let kind = $state<Kind>(untrack(() => kindOf(value)));
   let arg = $state(untrack(() => argOf(value)));
@@ -217,8 +222,8 @@
   }
 </script>
 
-<div class="trigger" class:open>
-  <button class="summary" onclick={() => (open = !open)}>
+<div class="trigger" class:open bind:this={box}>
+  <button class="summary" aria-expanded={open} onclick={() => (open = !open)}>
     <span class="ico" class:set={!!value}>{#if icon}{@const I = icon}<I size={14} />{/if}</span>
     <span class="txt">
       <span class="title">{title}</span>
@@ -405,6 +410,7 @@
   }
   .editor {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     padding: 10px;
     border-top: 1px solid var(--border);
@@ -412,13 +418,14 @@
   }
   .kinds {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 4px;
   }
   .kind {
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
     white-space: nowrap;
     height: 30px;
     padding: 0 8px;
