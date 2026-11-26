@@ -8,12 +8,8 @@ post_install() {
     unplug and replug the MasterHUB once.
 
     Optional game modes (Cyberpunk 2077, Deadlock, WoW Forever, Crimson Desert) are off.
-    To switch one on, run it once per game; it finds the game through Steam
-    (or pass --path), installs its game-side files and reads its look from your copy:
-      masterhub-games list
-      masterhub-games setup deadlock
-      systemctl --user enable --now masterhub-games
-    See /usr/share/doc/openmasterhub/GAME_MODES.md
+    Turn one on in the app: sidebar -> Game modes. It shows what will be installed
+    into the game and extracted from it, and does nothing until you approve.
 EOF
 }
 

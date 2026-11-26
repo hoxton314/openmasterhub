@@ -20,6 +20,8 @@ mod wow_forever;
 pub struct Info {
     pub name: &'static str,
     pub title: &'static str,
+    /// One line on what its mode gives, for the app.
+    pub about: &'static str,
     /// Its Steam app id, to find the install through Steam.
     pub steam: Option<u32>,
     pub make: fn(&Ctx) -> Game,
@@ -27,13 +29,13 @@ pub struct Info {
 
 pub const ALL: &[Info] = &[
     #[cfg(feature = "cyberpunk")]
-    Info { name: "cyberpunk", title: "Cyberpunk 2077", steam: Some(1091500), make: cyberpunk::game },
+    Info { name: "cyberpunk", title: "Cyberpunk 2077", about: "The game's binds, a combat page, and through a Cyber Engine Tweaks mod cheats, stats on the dial, favourites and loadouts.", steam: Some(1091500), make: cyberpunk::game },
     #[cfg(feature = "crimson")]
-    Info { name: "crimson_desert", title: "Crimson Desert", steam: Some(3321460), make: crimson_desert::game },
+    Info { name: "crimson_desert", title: "Crimson Desert", about: "Menus, quick slots, clips and the community map on the keys. Nothing is installed into the game.", steam: Some(3321460), make: crimson_desert::game },
     #[cfg(feature = "deadlock")]
-    Info { name: "deadlock", title: "Deadlock", steam: Some(1422450), make: deadlock::game },
+    Info { name: "deadlock", title: "Deadlock", about: "Your own binds for the shop, scores, chat and replays, console commands on spare keys, and a page with time, machine and music.", steam: Some(1422450), make: deadlock::game },
     #[cfg(feature = "wow")]
-    Info { name: "wow_forever", title: "World of Warcraft (WoW Forever)", steam: None, make: wow_forever::game },
+    Info { name: "wow_forever", title: "World of Warcraft (WoW Forever)", about: "Your binds and bars with cooldowns; an add-on gives XP, gold, zone and fights to the dial.", steam: None, make: wow_forever::game },
 ];
 
 /// The CET bridge's folder inside the Cyberpunk install.

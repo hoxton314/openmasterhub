@@ -2827,6 +2827,7 @@ dependencies = [
  "log",
  "masterhub-core",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

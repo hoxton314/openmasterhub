@@ -34,3 +34,11 @@ export async function pickImage(): Promise<string | undefined> {
 }
 
 export type { Face, Snapshot };
+
+/** A folder from the system's folder picker (a game's install). */
+export async function pickFolder(title: string): Promise<string | undefined> {
+  if (!inTauri) return '/games/SteamLibrary/steamapps/common/Example';
+  const { open } = await import('@tauri-apps/plugin-dialog');
+  const path = await open({ directory: true, multiple: false, title });
+  return typeof path === 'string' ? path : undefined;
+}

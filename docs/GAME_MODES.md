@@ -20,31 +20,28 @@ the game's memory.
 
 ## Switching a game on
 
-**Windows installer.** On the first install, the installer asks about each game. Yes finds
-the game through Steam, and if that fails it asks for the folder.
+**In the app** (Windows and Linux): open **Game modes** in the sidebar and click a game. The
+dialog shows:
 
-**Linux (AUR) and self-builds:**
+- the game folder it found through Steam (**Browse…** picks another one: GOG, Heroic,
+  Battle.net);
+- every step, with its paths: the files it puts into the game (Cyberpunk's Cyber Engine Tweaks
+  mod, Deadlock's `pulpit.cfg` and `autoexec.cfg` line, WoW's add-on), the icons it extracts
+  from your copy and where they go, and turning the mode on.
+
+Nothing happens until you click **Approve and turn on**. The same dialog turns a game off
+again. The game-mode service then starts (on Linux, its systemd user unit is enabled), and it
+reloads by itself whenever a game is switched on or off.
+
+**From a terminal** the same steps are available:
 
 ```sh
 masterhub-games list                      # games in this build, on/off, where they were found
-masterhub-games setup deadlock            # found through Steam, or:
+masterhub-games plan deadlock             # what setup would do, as JSON (what the app shows)
 masterhub-games setup cyberpunk --path "/games/Cyberpunk 2077"
+masterhub-games disable cyberpunk
 systemctl --user enable --now masterhub-games
 ```
-
-`setup` does four things:
-
-1. It finds the install: in your Steam libraries, or at `--path` (needed for GOG, Heroic and
-   Battle.net).
-2. It puts the game-side files in place:
-   - Cyberpunk: the CET mod in `bin/x64/plugins/cyber_engine_tweaks/mods/pulpit_bridge`.
-   - Deadlock: `pulpit.cfg` plus one line in `autoexec.cfg`.
-   - WoW: the add-on in `Interface/AddOns/PULPIT`.
-3. It reads the look's artwork from your copy of the game (see below). `--no-extract` skips
-   this step.
-4. It switches the game on in `games.toml`.
-
-`masterhub-games disable GAME` switches a game off again.
 
 ## Game artwork stays on your machine
 
@@ -61,7 +58,8 @@ game's look is built from your own install, on your machine:
 - **Cyberpunk 2077 and Crimson Desert** need nothing from the game. Their keys use Font
   Awesome glyphs and game-icons.net drawings.
 
-Without the extracted files, every key falls back to a Font Awesome glyph.
+Without the extracted files, every key falls back to a Font Awesome glyph. Setting a game up
+again (the same dialog) extracts them anew, for example after a game update.
 
 ## Config
 
@@ -79,8 +77,8 @@ save = "obs-cmd replay save"
 ```
 
 The window to follow is `steam_app_<id>` under Proton and the exe name on Windows. WoW under
-Lutris uses `class@title` (`steam_app_battlenet@World of Warcraft`). Restart
-`masterhub-games` after editing the file.
+Lutris uses `class@title` (`steam_app_battlenet@World of Warcraft`). `masterhub-games` reloads by itself when the file
+changes.
 
 ## Building
 

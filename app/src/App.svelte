@@ -1,6 +1,7 @@
 <script lang="ts">
   import { AppWindow, ChevronRight, Folder, LayoutGrid, Power, RotateCw } from 'lucide-svelte';
   import Dialog from './components/Dialog.svelte';
+  import GameDialog from './components/GameDialog.svelte';
   import Hub from './components/Hub.svelte';
   import Inspector from './components/Inspector.svelte';
   import Sidebar from './components/Sidebar.svelte';
@@ -58,6 +59,7 @@
   {/if}
 
   <Dialog />
+  <GameDialog />
   {#if hub.toast}<div class="toast">{hub.toast}</div>{/if}
 </div>
 

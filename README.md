@@ -114,8 +114,9 @@ the focused app. Protocol: [`docs/LIVE_SURFACE.md`](docs/LIVE_SURFACE.md).
 
 Cyberpunk 2077, Deadlock, WoW Forever and Crimson Desert get their own keys, dial readouts
 and intro while they have focus (from Dawid Gorczyca's PULPIT). Every game is off until you
-switch it on, in the Windows installer or with `masterhub-games setup <game>`. Nothing from
-any game ships with OpenMasterHUB: the look is read from your own install. See
+switch it on in the app (sidebar → Game modes), which shows what it will install and extract
+before you approve. Nothing from any game ships with OpenMasterHUB: the look is read from
+your own install. See
 [`docs/GAME_MODES.md`](docs/GAME_MODES.md).
 
 ## Install

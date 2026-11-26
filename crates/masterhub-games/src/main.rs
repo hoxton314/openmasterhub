@@ -2,9 +2,11 @@
 //! game that is switched on has focus, its mode takes the keypad, the dial and the rollers
 //! through masterhubd's live surface (docs/LIVE_SURFACE.md) and gives them back after.
 //!
-//! Usage:
-//!   masterhub-games [--config PATH]               run the modes of the games switched on
-//!   masterhub-games list                          games in this build and their state
+//! Usage (the app's Game modes section uses the same commands):
+//!   masterhub-games [--config PATH]               run the modes of the games switched on;
+//!                                                 reloads when games.toml changes
+//!   masterhub-games list [--json]                 games in this build and their state
+//!   masterhub-games plan GAME [--path DIR]        what setup would do, as JSON
 //!   masterhub-games setup GAME [--path DIR] [--no-extract]
 //!                                                 install the game-side files, extract the
 //!                                                 look from your install, switch it on
@@ -52,7 +54,15 @@ fn main() -> Result<()> {
     let positional = |i: usize| rest.iter().filter(|a| !a.starts_with('-')).nth(i).cloned();
     match command.as_deref() {
         None => {}
-        Some("list") => return setup::list(&path),
+        Some("list") => return setup::list(&path, flag("--json")),
+        Some("plan") => {
+            let game = positional(0).context("plan needs a game name")?;
+            let info = games::by_name(&game).with_context(|| format!("unknown game {game:?}"))?;
+            let cfg = config::Config::load(&path)?;
+            let plan = setup::plan(info, &cfg, value("--path").map(PathBuf::from), !flag("--no-extract"));
+            println!("{}", serde_json::to_string(&plan)?);
+            return Ok(());
+        }
         Some("setup") => {
             let game = positional(0).context("setup needs a game name (see `masterhub-games list`)")?;
             return setup::setup(&path, &game, value("--path").map(PathBuf::from), !flag("--no-extract"));
@@ -74,15 +84,68 @@ fn main() -> Result<()> {
         println!("{}: ok", path.display());
         return Ok(());
     }
+    let Some(_lock) = single_instance()? else {
+        log::info!("masterhub-games is already running");
+        return Ok(());
+    };
     let games = games::enabled(&cfg);
     if games.is_empty() {
-        log::info!("no game is switched on in {} (masterhub-games setup GAME); nothing to do", path.display());
-        return Ok(());
+        log::info!("no game is switched on in {}; waiting for one (the app's Game modes)", path.display());
+    } else {
+        log::info!("game modes: {}", games.iter().map(|g| g.title).collect::<Vec<_>>().join(", "));
     }
-    log::info!("game modes: {}", games.iter().map(|g| g.title).collect::<Vec<_>>().join(", "));
     game::spawn_all(games);
+    // Game modes are threads with their own claims; a changed config starts over cleanly.
+    let stamp = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let start = stamp(&path);
     loop {
-        std::thread::park();
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        if stamp(&path) != start {
+            log::info!("{} changed: restarting", path.display());
+            drop(_lock);
+            return restart();
+        }
+    }
+}
+
+/// Set for the copy `restart` starts.
+const RESTARTED: &str = "MASTERHUB_GAMES_RESTARTED";
+
+/// Hold a lock for this user's running copy; `None` when another one holds it.
+fn single_instance() -> Result<Option<std::fs::File>> {
+    let dir = ctx::data_dir("");
+    std::fs::create_dir_all(&dir)?;
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(dir.join("masterhub-games.lock"))?;
+    // Started by `restart` on Windows: the old copy may still be on its way out.
+    let tries = if std::env::var_os(RESTARTED).is_some() { 50 } else { 1 };
+    for _ in 0..tries {
+        match f.try_lock() {
+            Ok(()) => return Ok(Some(f)),
+            Err(std::fs::TryLockError::WouldBlock) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(std::fs::TryLockError::Error(e)) => return Err(e.into()),
+        }
+    }
+    Ok(None)
+}
+
+/// Start this program again with the same arguments: in place on Unix (systemd keeps the
+/// same process), as a new detached process on Windows.
+fn restart() -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(std::env::args_os().skip(1)).env(RESTARTED, "1");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        Err(cmd.exec().into())
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW).spawn()?;
+        Ok(())
     }
 }
 

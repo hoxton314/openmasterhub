@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use serde::Serialize;
 
 use crate::config::{Config, GameConfig};
 use crate::ctx::data_dir;
@@ -20,47 +21,150 @@ const WOW_LUA: &str = include_str!("../games/wow_forever/addon/PULPIT/PULPIT.lua
 const WOW_TOC: &str = include_str!("../games/wow_forever/addon/PULPIT/PULPIT.toc");
 const WOW_TOC_FOREVER: &str = include_str!("../games/wow_forever/addon/PULPIT/PULPIT_Forever.toc");
 
-/// Set up `name` and switch it on; `path` overrides the install found through Steam.
-pub fn setup(cfg_path: &Path, name: &str, path: Option<PathBuf>, extract: bool) -> Result<()> {
-    let info = games::by_name(name).with_context(|| format!("unknown game {name:?}"))?;
-    let mut cfg = Config::load(cfg_path)?;
-    let install = match path {
-        Some(p) => Some(p.canonicalize().with_context(|| format!("{} does not exist", p.display()))?),
-        None => games::install(info, &cfg),
-    };
-    let install = match (install, info.name) {
-        (Some(p), _) => p,
-        // Keys-only games work without knowing where they are.
-        (None, "crimson_desert") => PathBuf::new(),
-        (None, _) => bail!("{} was not found; pass its install folder with --path", info.title),
-    };
-    if !install.as_os_str().is_empty() {
-        println!("{}: {}", info.title, install.display());
+/// One thing `setup` does, shown to the user for approval before it runs.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Step {
+    /// Copy the Cyber Engine Tweaks bridge mod into this folder.
+    CetBridge { path: PathBuf },
+    /// Put `pulpit.cfg` into the game's cfg folder and an `exec pulpit` line into autoexec.cfg.
+    DeadlockCfg { path: PathBuf },
+    /// Cut the look's icons out of the game's archive into our data folder.
+    DeadlockIcons { from: PathBuf, to: PathBuf },
+    /// Copy the add-on into the game's AddOns folder.
+    WowAddon { path: PathBuf },
+    /// Switch the game on in games.toml.
+    Enable,
+}
+
+impl Step {
+    /// What it does, in one sentence.
+    pub fn text(&self) -> String {
+        match self {
+            Step::CetBridge { path } => format!("Install the bridge mod into {}", path.display()),
+            Step::DeadlockCfg { path } => format!("Add pulpit.cfg and an `exec pulpit` line to autoexec.cfg in {}", path.display()),
+            Step::DeadlockIcons { from, to } => format!("Extract the game's icons from {} into {}", from.display(), to.display()),
+            Step::WowAddon { path } => format!("Install the PULPIT add-on into {}", path.display()),
+            Step::Enable => "Turn the game mode on".into(),
+        }
     }
+}
+
+/// What setting up a game would do, from its install folder (given, configured or found).
+#[derive(Debug, Clone, Serialize)]
+pub struct Plan {
+    pub game: &'static str,
+    pub title: &'static str,
+    /// The install folder the steps use; `None` when it is unknown (and needed).
+    pub path: Option<PathBuf>,
+    /// The folder was found through Steam rather than given or configured.
+    pub detected: bool,
+    pub steps: Vec<Step>,
+    /// Things the user should know (a missing mod loader, a part not built in yet).
+    pub notes: Vec<String>,
+    /// Why it can't be set up from this folder; the steps are empty then.
+    pub error: Option<String>,
+}
+
+/// What `setup` would do for `info` with `path` (or the configured / Steam folder).
+pub fn plan(info: &'static Info, cfg: &Config, path: Option<PathBuf>, extract: bool) -> Plan {
+    let detected = path.is_none() && cfg.games.get(info.name).and_then(|g| g.path.as_ref()).is_none();
+    let path = path.or_else(|| games::install(info, cfg));
+    let mut p = Plan { game: info.name, title: info.title, path: path.clone(), detected, steps: Vec::new(), notes: Vec::new(), error: None };
+    let need = |p: &mut Plan, what: &str| -> Option<PathBuf> {
+        match &path {
+            Some(dir) if dir.is_dir() => Some(dir.clone()),
+            Some(dir) => {
+                p.error = Some(format!("{} is not a folder", dir.display()));
+                None
+            }
+            None => {
+                let how = if info.steam.is_some() { "was not found through Steam" } else { "is not in its usual place" };
+                p.error = Some(format!("{} {how}: choose its {what}", info.title));
+                None
+            }
+        }
+    };
     match info.name {
-        "cyberpunk" => install_cet(&install)?,
+        "cyberpunk" => {
+            let Some(dir) = need(&mut p, "install folder (the one with bin/x64)") else { return p };
+            let cet = dir.join("bin/x64/plugins/cyber_engine_tweaks");
+            if cet.is_dir() {
+                p.steps.push(Step::CetBridge { path: dir.join(games::cyberpunk_bridge()) });
+            } else if dir.join("bin/x64").is_dir() {
+                p.notes.push("Cyber Engine Tweaks is not installed: the game keys work, the cheat keys and stats need it. Set up again after installing CET.".into());
+            } else {
+                p.error = Some(format!("{} has no bin/x64: not a Cyberpunk 2077 folder", dir.display()));
+                return p;
+            }
+        }
         "deadlock" => {
-            install_deadlock_cfg(&install)?;
+            let Some(dir) = need(&mut p, "install folder (the one with game/citadel)") else { return p };
+            let citadel = dir.join("game/citadel");
+            if !citadel.join("cfg").is_dir() {
+                p.error = Some(format!("{} has no game/citadel/cfg: not a Deadlock folder", dir.display()));
+                return p;
+            }
+            p.steps.push(Step::DeadlockCfg { path: citadel.join("cfg") });
             if extract {
-                extract_deadlock(&install, &data_dir(info.name).join("masks"))?;
+                p.steps.push(Step::DeadlockIcons { from: citadel.join("pak01_dir.vpk"), to: data_dir(info.name).join("masks") });
             }
         }
         "wow_forever" => {
-            install_wow_addon(&install)?;
+            let Some(dir) = need(&mut p, "_forever_ folder (inside World of Warcraft)") else { return p };
+            p.steps.push(Step::WowAddon { path: dir.join("Interface/AddOns/PULPIT") });
             if extract {
-                println!("  game icons and fonts: extraction from Battle.net's CASC storage is not built in yet;");
-                println!("  the keys use their stand-in look (labels, Cinzel and IM Fell) meanwhile");
+                p.notes.push("WoW's icons and fonts can't be extracted yet (Battle.net's CASC storage): the keys use a stand-in look.".into());
             }
         }
-        _ => {}
+        // Keys only: nothing to put into the game.
+        _ => p.path = path.filter(|d| d.is_dir()),
     }
-    let entry = cfg.games.entry(info.name.to_owned()).or_insert_with(GameConfig::default);
-    entry.enabled = true;
-    if !install.as_os_str().is_empty() && Some(&install) != info.steam.and_then(crate::steam::find_app).as_ref() {
-        entry.path = Some(install);
+    p.steps.push(Step::Enable);
+    p
+}
+
+/// Run an approved plan and save the config.
+pub fn apply(cfg_path: &Path, plan: &Plan) -> Result<()> {
+    if let Some(e) = &plan.error {
+        bail!("{e}");
     }
-    cfg.save(cfg_path)?;
-    println!("{} is on ({}). Restart masterhub-games to pick it up.", info.title, cfg_path.display());
+    let info = games::by_name(plan.game).context("unknown game")?;
+    let mut cfg = Config::load(cfg_path)?;
+    for step in &plan.steps {
+        println!("{}", step.text());
+        match step {
+            Step::CetBridge { path } => install_cet(path)?,
+            Step::DeadlockCfg { path } => install_deadlock_cfg(path)?,
+            Step::DeadlockIcons { from, to } => extract_deadlock(from, to)?,
+            Step::WowAddon { path } => install_wow_addon(path)?,
+            Step::Enable => {
+                let entry = cfg.games.entry(info.name.to_owned()).or_insert_with(GameConfig::default);
+                entry.enabled = true;
+                // A folder Steam finds by itself is not pinned in the config.
+                if let Some(p) = plan.path.as_ref().filter(|_| !plan.detected) {
+                    entry.path = Some(p.clone());
+                }
+            }
+        }
+    }
+    cfg.save(cfg_path)
+}
+
+/// `setup GAME [--path DIR]` from the command line: plan, show and apply.
+pub fn setup(cfg_path: &Path, name: &str, path: Option<PathBuf>, extract: bool) -> Result<()> {
+    let info = games::by_name(name).with_context(|| format!("unknown game {name:?}"))?;
+    let cfg = Config::load(cfg_path)?;
+    let path = path.map(|p| p.canonicalize().with_context(|| format!("{} does not exist", p.display()))).transpose()?;
+    let plan = plan(info, &cfg, path, extract);
+    if let Some(p) = &plan.path {
+        println!("{}: {}", info.title, p.display());
+    }
+    for n in &plan.notes {
+        println!("note: {n}");
+    }
+    apply(cfg_path, &plan)?;
+    println!("{} is on ({}).", info.title, cfg_path.display());
     Ok(())
 }
 
@@ -74,18 +178,47 @@ pub fn disable(cfg_path: &Path, name: &str) -> Result<()> {
     cfg.save(cfg_path)
 }
 
+/// A game's state, for `list` and the app.
+#[derive(Debug, Clone, Serialize)]
+pub struct Status {
+    pub game: &'static str,
+    pub title: &'static str,
+    pub about: &'static str,
+    pub enabled: bool,
+    /// The configured or found install folder.
+    pub path: Option<PathBuf>,
+    /// The look's assets from the user's install are in place (or the game needs none).
+    pub assets: bool,
+}
+
+pub fn status(cfg: &Config) -> Vec<Status> {
+    games::ALL
+        .iter()
+        .map(|info| Status {
+            game: info.name,
+            title: info.title,
+            about: info.about,
+            enabled: cfg.games.get(info.name).is_some_and(|g| g.enabled),
+            path: games::install(info, cfg),
+            assets: assets_ready(info),
+        })
+        .collect()
+}
+
 /// What this build has and what is set up, for `masterhub-games list`.
-pub fn list(cfg_path: &Path) -> Result<()> {
-    let cfg = Config::load(cfg_path)?;
-    for info in games::ALL {
-        let on = cfg.games.get(info.name).is_some_and(|g| g.enabled);
-        let install = games::install(info, &cfg);
+pub fn list(cfg_path: &Path, json: bool) -> Result<()> {
+    let st = status(&Config::load(cfg_path)?);
+    if json {
+        println!("{}", serde_json::to_string(&st)?);
+        return Ok(());
+    }
+    for s in st {
         println!(
             "{:<15} {:<4} {}{}",
-            info.name,
-            if on { "on" } else { "off" },
-            install.as_ref().map_or("not found".into(), |p| p.display().to_string()),
-            if assets_ready(info) { "" } else { "  (game assets not extracted)" }
+            s.game,
+            if s.enabled { "on" } else { "off" },
+            s.path.as_ref().map_or("not found".into(), |p| p.display().to_string()),
+            if s.assets { "" } else { "  (game assets not extracted)" }
         );
     }
     Ok(())
@@ -100,29 +233,17 @@ fn assets_ready(info: &Info) -> bool {
     }
 }
 
-/// Copy the CET bridge into `<game>/bin/x64/plugins/cyber_engine_tweaks/mods/pulpit_bridge`.
-fn install_cet(install: &Path) -> Result<()> {
-    let cet = install.join("bin/x64/plugins/cyber_engine_tweaks");
-    if !cet.is_dir() {
-        println!("  Cyber Engine Tweaks is not installed: game keys work, the cheat keys need CET");
-        println!("  (https://github.com/maximegmd/CyberEngineTweaks); run setup again after installing it");
-        return Ok(());
-    }
-    let dir = install.join(crate::games::cyberpunk_bridge());
+/// Copy the CET bridge into `dir` (`.../cyber_engine_tweaks/mods/pulpit_bridge`).
+fn install_cet(dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir.join("eval"))?;
     std::fs::write(dir.join("init.lua"), CET_INIT)?;
     std::fs::write(dir.join("logic.lua"), CET_LOGIC)?;
-    println!("  bridge mod: {}", dir.display());
     Ok(())
 }
 
 /// Put `pulpit.cfg` (console commands on the navigation keys) into the game's cfg folder and
 /// make `autoexec.cfg` run it.
-fn install_deadlock_cfg(install: &Path) -> Result<()> {
-    let cfg = install.join("game/citadel/cfg");
-    if !cfg.is_dir() {
-        bail!("no Deadlock cfg folder at {}", cfg.display());
-    }
+fn install_deadlock_cfg(cfg: &Path) -> Result<()> {
     std::fs::write(cfg.join("pulpit.cfg"), DEADLOCK_CFG)?;
     let auto = cfg.join("autoexec.cfg");
     let text = std::fs::read_to_string(&auto).unwrap_or_default();
@@ -130,18 +251,15 @@ fn install_deadlock_cfg(install: &Path) -> Result<()> {
         let sep = if text.is_empty() || text.ends_with('\n') { "" } else { "\n" };
         std::fs::write(&auto, format!("{text}{sep}exec pulpit\n"))?;
     }
-    println!("  console binds: {}", cfg.join("pulpit.cfg").display());
     Ok(())
 }
 
-/// Copy the add-on into `<install>/Interface/AddOns/PULPIT`.
-fn install_wow_addon(install: &Path) -> Result<()> {
-    let dir = install.join("Interface/AddOns/PULPIT");
-    std::fs::create_dir_all(&dir)?;
+/// Copy the add-on into `dir` (`<install>/Interface/AddOns/PULPIT`).
+fn install_wow_addon(dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
     std::fs::write(dir.join("PULPIT.lua"), WOW_LUA)?;
     std::fs::write(dir.join("PULPIT.toc"), WOW_TOC)?;
     std::fs::write(dir.join("PULPIT_Forever.toc"), WOW_TOC_FOREVER)?;
-    println!("  add-on: {} (switch it on in the game's AddOns list)", dir.display());
     Ok(())
 }
 
@@ -165,8 +283,8 @@ const DEADLOCK_ICONS: &[(&str, &str)] = &[
 ];
 
 /// Cut the icons out of the game's `pak01` into 128 px grey masks (the picture's alpha).
-fn extract_deadlock(install: &Path, out: &Path) -> Result<()> {
-    let pak = crate::vpk::Vpk::open(&install.join("game/citadel/pak01_dir.vpk"))?;
+fn extract_deadlock(pak: &Path, out: &Path) -> Result<()> {
+    let pak = crate::vpk::Vpk::open(pak)?;
     std::fs::create_dir_all(out)?;
     let mut done = 0;
     for (name, src) in DEADLOCK_ICONS {

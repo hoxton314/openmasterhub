@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Folder, LayoutGrid, Ellipsis, Plus, UserRound } from 'lucide-svelte';
+  import { Folder, Gamepad2, LayoutGrid, Ellipsis, Plus, UserRound } from 'lucide-svelte';
+  import { games, refreshGames } from '../lib/games.svelte';
   import { currentPage, currentProfile, edit, hub, profileMut, save, setProfile, showPage, toast } from '../lib/hub.svelte';
   import { invoke } from '../lib/backend';
   import { ui } from '../lib/ui.svelte';
@@ -11,6 +12,10 @@
   const folders = $derived(active?.folder ?? []);
   const page = $derived(currentPage()?.name);
   const moduleCount = $derived(hub.modules.filter((m) => m.kind !== 'base').length);
+
+  $effect(() => {
+    refreshGames();
+  });
 
   let menu = $state(''); // e.g. "profile:Default", "page:Main", "add-page", "add-profile"
   const toggle = (id: string) => (e: MouseEvent) => {
@@ -216,6 +221,22 @@
     {/each}
   </div>
 
+  {#if games.list.length}
+    <div class="section">
+      <div class="section-head"><span>Game modes</span></div>
+      {#each games.list as g (g.game)}
+        <button class="item" onclick={() => (games.open = g)} title={g.about}>
+          <Gamepad2 size={14} />
+          <span class="text">
+            <span class="title">{g.title}</span>
+            <span class="sub">{g.enabled ? (g.assets ? 'On' : 'On · stand-in look') : 'Off · click to set up'}</span>
+          </span>
+          {#if g.enabled}<span class="live on" title="Game mode on"></span>{/if}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <div class="section grow">
     <div class="section-head">
       <span>Keypad pages</span>
@@ -392,6 +413,9 @@
     height: 6px;
     border-radius: 50%;
     background: var(--accent);
+  }
+  .live.on {
+    background: var(--success);
   }
   .more {
     position: absolute;
