@@ -3,8 +3,9 @@
   import { games, refreshGames } from '../lib/games.svelte';
   import { currentPage, currentProfile, edit, hub, profileMut, save, setProfile, showPage, toast } from '../lib/hub.svelte';
   import { invoke } from '../lib/backend';
+  import { renameProfile as renameProfileRefs, retarget } from '../lib/model/rename';
   import { ui } from '../lib/ui.svelte';
-  import type { Action, Config, GameStatus, Profile } from '../lib/types';
+  import type { GameStatus, Profile } from '../lib/types';
 
   const profiles = $derived(hub.config.profile ?? []);
 
@@ -71,18 +72,6 @@
   function uniqueName(base: string) {
     const taken = new Set([...pages, ...folders].map((x) => x.name));
     for (let i = 1; ; i++) if (!taken.has(`${base} ${i}`)) return `${base} ${i}`;
-  }
-
-  /** Rename references in actions when a page/folder/profile is renamed. */
-  function retarget(c: Config, pred: (a: Action) => boolean, set: (a: Action) => void) {
-    for (const p of c.profile ?? []) {
-      const actions: (Action | undefined)[] = [];
-      for (const pg of [...(p.page ?? []), ...(p.folder ?? [])]) for (const k of pg.key ?? []) actions.push(k.press, k.release);
-      for (const k of p.knob ?? []) actions.push(k.cw, k.ccw, k.press, k.release);
-      if (p.dial) actions.push(p.dial.cw, p.dial.ccw, p.dial.press, p.dial.release);
-      for (const r of p.roller ?? []) actions.push(r.away, r.toward);
-      for (const a of actions) if (a && pred(a)) set(a);
-    }
   }
 
   async function addPage(folder: boolean) {
@@ -180,10 +169,7 @@
       done: async (name) => {
         if (!name || name === old) return;
         if (profiles.some((p) => p.name === name)) return toast('A profile with that name already exists');
-        edit((c) => {
-          for (const p of c.profile ?? []) if (p.name === old) p.name = name;
-          retarget(c, (a) => 'profile' in a && a.profile === old, (a) => 'profile' in a && (a.profile = name));
-        });
+        edit((c) => renameProfileRefs(c, old, name), { label: 'rename' });
         await save();
         if (active?.name === old || hub.state.profile === old) await setProfile(name);
       },

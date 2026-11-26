@@ -1,7 +1,7 @@
 <script lang="ts">
   import { CircleDot, Disc3, Grid3x3, MousePointerClick, RectangleHorizontal, SlidersHorizontal, SquareDashed, X } from 'lucide-svelte';
   import ActionEditor from './ActionEditor.svelte';
-  import ColorField from './ColorField.svelte';
+  import ColorField from './ui/ColorField.svelte';
   import FaceEditor from './FaceEditor.svelte';
   import { currentPage, currentProfile, dialMut, displayKey, edit, faderMut, hub, keyMut, knobMut, pageMut, rollerMut } from '../lib/hub.svelte';
   import { TARGET_DIAL, type Action, type Face, type ModuleKind, type Orientation } from '../lib/types';

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Bot, Clock, Cpu, Gpu, ImagePlus, MemoryStick, Music2, Thermometer, Volume2, X } from 'lucide-svelte';
   import { invoke, pickImage } from '../lib/backend';
-  import ColorField from './ColorField.svelte';
+  import ColorField from './ui/ColorField.svelte';
   import type { Face, Widget } from '../lib/types';
 
   let {
