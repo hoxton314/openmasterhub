@@ -6,8 +6,6 @@
 //! Layout: [magenta][cyan][seq][60 symbols][checksum]; a symbol is 6 bits, 2 per colour
 //! channel at levels 0/85/170/255. The 60 symbols carry 45 bytes (see [`Live`]).
 
-use std::io::Read;
-use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -66,21 +64,21 @@ pub fn start(want: Arc<std::sync::atomic::AtomicBool>) -> Arc<Mutex<Reading>> {
                     window_at = Instant::now();
                 }
                 let Some((x, y)) = window else { continue };
-                if let Some(live) = capture(x, y).and_then(|img| decode(&img)) {
-                    if let Ok(mut r) = o.lock() {
+                if let Some(live) = capture(x, y).and_then(|img| decode(&img))
+                    && let Ok(mut r) = o.lock() {
                         r.live = Some(live);
                         r.at = Some(Instant::now());
                     }
-                }
             }
         })
         .expect("spawn wow-strip thread");
     out
 }
 
-/// The WoW window's top-left in layout coordinates.
+/// The WoW window's top-left in layout coordinates (Hyprland).
+#[cfg(not(windows))]
 fn game_window() -> Option<(i32, i32)> {
-    let out = Command::new("hyprctl").args(["clients", "-j"]).output().ok()?;
+    let out = std::process::Command::new("hyprctl").args(["clients", "-j"]).output().ok()?;
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
     v.as_array()?.iter().find(|c| c["title"] == "World of Warcraft").and_then(|c| Some((c["at"][0].as_i64()? as i32, c["at"][1].as_i64()? as i32)))
 }
@@ -93,7 +91,10 @@ pub struct Img {
 }
 
 /// A small screen grab of the corner (grim, PPM to stdout).
+#[cfg(not(windows))]
 fn capture(x: i32, y: i32) -> Option<Img> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
     let mut child = Command::new("grim").args(["-t", "ppm", "-g", &format!("{x},{y} 440x14"), "-"]).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
     let mut buf = Vec::new();
     child.stdout.take()?.read_to_end(&mut buf).ok()?;
@@ -101,6 +102,54 @@ fn capture(x: i32, y: i32) -> Option<Img> {
     ppm(&buf)
 }
 
+/// The WoW window's client area top-left on the screen.
+#[cfg(windows)]
+fn game_window() -> Option<(i32, i32)> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::ClientToScreen;
+    use windows_sys::Win32::UI::WindowsAndMessaging::FindWindowW;
+    let title: Vec<u16> = "World of Warcraft".encode_utf16().chain([0]).collect();
+    // SAFETY: a null-terminated title; the handle is only used for the call below.
+    let hwnd = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
+    if hwnd.is_null() {
+        return None;
+    }
+    let mut p = POINT { x: 0, y: 0 };
+    // SAFETY: hwnd is a live window handle and p a valid out pointer.
+    (unsafe { ClientToScreen(hwnd, &mut p) } != 0).then_some((p.x, p.y))
+}
+
+/// A small screen grab of the corner (GDI).
+#[cfg(windows)]
+fn capture(x: i32, y: i32) -> Option<Img> {
+    use windows_sys::Win32::Graphics::Gdi::*;
+    const W: i32 = 440;
+    const H: i32 = 14;
+    // SAFETY: plain GDI calls on handles created and released here; the buffer holds W×H BGRA pixels.
+    unsafe {
+        let screen = GetDC(std::ptr::null_mut());
+        let mem = CreateCompatibleDC(screen);
+        let bmp = CreateCompatibleBitmap(screen, W, H);
+        let old = SelectObject(mem, bmp);
+        let ok = BitBlt(mem, 0, 0, W, H, screen, x, y, SRCCOPY) != 0;
+        let mut info: BITMAPINFO = std::mem::zeroed();
+        info.bmiHeader.biSize = std::mem::size_of::<BITMAPINFOHEADER>() as u32;
+        info.bmiHeader.biWidth = W;
+        info.bmiHeader.biHeight = -H;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        let mut buf = vec![0u8; (W * H * 4) as usize];
+        let lines = GetDIBits(mem, bmp, 0, H as u32, buf.as_mut_ptr().cast(), &mut info, DIB_RGB_COLORS);
+        SelectObject(mem, old);
+        DeleteObject(bmp);
+        DeleteDC(mem);
+        ReleaseDC(std::ptr::null_mut(), screen);
+        (ok && lines == H).then(|| Img { w: W as usize, h: H as usize, px: buf.as_chunks::<4>().0.iter().map(|c| [c[2], c[1], c[0]]).collect() })
+    }
+}
+
+#[cfg_attr(windows, allow(dead_code))]
 fn ppm(b: &[u8]) -> Option<Img> {
     // "P6\n<w> <h>\n<max>\n" then RGB bytes.
     let mut fields = Vec::new();
@@ -121,7 +170,7 @@ fn ppm(b: &[u8]) -> Option<Img> {
     }
     let (w, h): (usize, usize) = (fields[1].parse().ok()?, fields[2].parse().ok()?);
     let data = b.get(i..i + w * h * 3)?;
-    Some(Img { w, h, px: data.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect() })
+    Some(Img { w, h, px: data.as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2]]).collect() })
 }
 
 fn magenta(p: [u8; 3]) -> bool {

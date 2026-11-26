@@ -1,19 +1,33 @@
 [package]
-name = "pulpit"
-description = "PULPIT: the KREATURA layer for the MasterHUB (daily mode, live faces)"
+name = "masterhub-games"
+description = "Opt-in game modes for the MasterHUB: keys, dial and intro per game, over masterhubd's live surface"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+# From PULPIT by Dawid Gorczyca, under its original licence.
+license = "MIT OR Apache-2.0"
+
+[features]
+# One feature per game; a self-build can leave games out: --no-default-features --features deadlock
+default = ["cyberpunk", "deadlock", "wow", "crimson"]
+cyberpunk = []
+deadlock = []
+wow = []
+crimson = []
 
 [dependencies]
-pulpit-render = { path = "../pulpit-render" }
-masterhub-core = { path = "../../../openmasterhub/crates/masterhub-core" }
-image = { version = "0.25", default-features = false, features = ["jpeg"] }
-base64 = "0.23"
+masterhub-games-render = { path = "../masterhub-games-render" }
+masterhub-core = { path = "../masterhub-core" }
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+base64 = "0.23.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"
-anyhow = "1"
+anyhow = "1.0.104"
 log = "0.4"
-env_logger = "0.11"
-jiff = "0.2"
+env_logger = "0.11.11"
+jiff = "0.2.38"
+dirs = "6"
+resvg = { version = "0.45", default-features = false }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }

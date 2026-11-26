@@ -1,18 +1,18 @@
 [package]
-name = "pulpit-render"
-description = "PULPIT faces for MasterHUB keys and the dial (docs/STYLE.md)"
+name = "masterhub-games-render"
+description = "Key and dial faces of the OpenMasterHUB game modes"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+# From PULPIT by Dawid Gorczyca, under its original licence.
+license = "MIT OR Apache-2.0"
 
 [dependencies]
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
-anyhow = "1"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
+anyhow = "1.0.104"
 tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
 ab_glyph = "0.2"
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "opentype-layout"] }
 svgtypes = "0.15"
 
 [dev-dependencies]
-# Animated GIFs for the press gallery example.
-image = { version = "0.25", default-features = false, features = ["png", "gif"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "gif"] }

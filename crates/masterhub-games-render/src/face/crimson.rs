@@ -242,7 +242,7 @@ impl Painter {
                 // Wear: speckles and a nibbled edge, the same on every frame.
                 for y in 12..46usize {
                     for x in 19..53usize {
-                        let edge = x < 21 || x > 50 || y < 14 || y > 43;
+                        let edge = !(21..=50).contains(&x) || !(14..=43).contains(&y);
                         if rnd(x as u32 * 131 + y as u32, 7) > if edge { 0.7 } else { 0.985 } {
                             let d = &mut c.px[y * K + x];
                             *d = mix(*d, tint, 0.55);

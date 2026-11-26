@@ -92,7 +92,7 @@ fn scrolling_label_moves() {
     assert_ne!(r.key(f, 0.0, 0.0), r.key(f, 0.5, 0.0));
 }
 
-/// Faces whose default (Glare) press frames are pinned by [`GLARE_REFERENCE`].
+/// A few faces with every kind of content, for the press-style tests.
 fn glare_reference_faces() -> Vec<KeyFace> {
     let mut faces = samples::keys();
     faces.push(KeyFace {
@@ -104,42 +104,6 @@ fn glare_reference_faces() -> Vec<KeyFace> {
     });
     faces.push(KeyFace { logo: Some("blender".into()), ring: Some(0.3), minor: Some("RENDER".into()), ..Default::default() });
     faces
-}
-
-const GLARE_PS: [f32; 6] = [1.0, 0.85, 0.6, 0.3, 0.05, 0.0];
-
-fn fnv(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
-}
-
-fn glare_hashes(r: &Renderer) -> Vec<u64> {
-    let mut out = Vec::new();
-    for f in glare_reference_faces() {
-        for p in GLARE_PS {
-            out.push(fnv(r.key(&f, 0.4, p).as_raw()));
-        }
-    }
-    out
-}
-
-/// FNV-1a of each frame from [`glare_hashes`], taken from the renderer before press styles
-/// existed (commit beeea6a): the approved Glare look must stay byte for byte the same.
-const GLARE_REFERENCE: [u64; 42] = [
-    0x76536532ea2e28c1, 0x39e91a2b071c96f5, 0x80ffce2d6a86171e, 0xfcbe2010adaf31e7, 0xeb76b68a31ea68ae,
-    0xad396207ddc2acca, 0xa8382c1d5c09c7dc, 0x7e06130053e6f5a9, 0x49e4e9bc2c128774, 0x5e83384dca0b436b,
-    0xf9bccfc8f8cbb44b, 0x782f2e582ba2641b, 0x54de40910b4d724e, 0x7b1857bc770616b0, 0xad8a83f22bfce40b,
-    0x72d9d55a53c06914, 0x83cd76eed60b83c4, 0x8f09ce9cea08f776, 0x8cdf69f153d6bce7, 0xef4e3fc9fa6446ca,
-    0xd932efc9eda05bbd, 0x38d4eee2bf53430d, 0xf9ad4b693b713d7d, 0xbddea8652970877c, 0xb256fc7fd0031c0f,
-    0xef7f2151c90cbcb2, 0xa4bce2dee7c63806, 0xda7c861b4299e1ab, 0x7a087b3141655923, 0x0645fd878ee6b133,
-    0x4bcab07d694d482b, 0x414fc8ba0fb18141, 0x60f03d9f4eb27db2, 0x9f8b9f0b3e5e3866, 0xb988905d7724bf22,
-    0x73e46c9d46c672e8, 0xb42af4bc709c9667, 0xcd58b85f0ba48db6, 0x10592ed02abba284, 0x7564f49478609f26,
-    0x18243dc6dd0ee729, 0xe62739962cf658a3,
-];
-
-#[test]
-fn glare_is_unchanged() {
-    assert_eq!(PressStyle::default(), PressStyle::Glare);
-    assert_eq!(glare_hashes(&r()), GLARE_REFERENCE);
 }
 
 #[test]

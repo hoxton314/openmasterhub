@@ -14,13 +14,13 @@ mod intro;
 mod kern;
 mod text;
 
-/// The face glyphs used by the sample sheet (uicons-solid-rounded).
+/// The face glyphs used by the sample sheet (Font Awesome Free, solid).
 pub mod glyphs {
-    pub const SPARKLES: char = '\u{fc5d}';
-    pub const OVEN: char = '\u{f9d0}';
-    pub const GLOBE: char = '\u{f6f9}';
-    pub const REC: char = '\u{faf3}';
-    pub const EYE_DROPPER: char = '\u{f5ea}';
+    pub const SPARKLES: char = '\u{e2ca}';
+    pub const OVEN: char = '\u{e4f1}';
+    pub const GLOBE: char = '\u{f0ac}';
+    pub const REC: char = '\u{f111}';
+    pub const EYE_DROPPER: char = '\u{f1fb}';
 }
 
 /// The five sample keys and the dial of the style board (`tools/style-samples/samples.py`), for
@@ -61,7 +61,9 @@ pub use face::crimson::{CrimsonFont, CrimsonFrame, CrimsonIcons, CrimsonPress, C
 pub use face::deadlock::{DeadlockFrame, DeadlockPress, DeadlockRing, DeadlockStyle};
 pub use face::wow::{WowFrame, WowPress, WowRing, WowStyle};
 pub use face::cyber::{CyberStyle, Frame, IconFx, Numbers, PressFx, Ring};
+pub use art::set_mask_dir;
 pub use intro::{GAP as INTRO_GAP, IntroStyle};
+pub use text::{set_deadlock_font, set_wow_src};
 
 pub const KEY_SIZE: u32 = 72;
 pub const DIAL_SIZE: u32 = 240;
@@ -118,7 +120,7 @@ pub fn press_styles() -> &'static [(PressStyle, &'static str)] {
 pub struct KeyFace {
     /// Top line, the important text. Scrolls when it does not fit.
     pub label: String,
-    /// A glyph from uicons-solid-rounded, e.g. `'\u{f6f9}'` (globe).
+    /// A glyph from uicons-solid-rounded, e.g. `'\u{f0ac}'` (globe).
     pub icon: Option<char>,
     /// Ground colour (sRGB) for the key's category; plum-deep when `None`.
     pub ground: Option<[u8; 3]>,

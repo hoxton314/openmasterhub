@@ -1,5 +1,6 @@
 //! Drawn icons for game looks (game-icons.net, CC BY 3.0, see `art/CREDITS.md`): 512×512 SVGs
 //! in `art/` whose last path is the drawing. Filled like logos, so they take colours and pop.
+//! Masks from the user's own game install come in at run time ([`set_mask_dir`]).
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -20,35 +21,39 @@ art!(
     "film-strip", "backward-time", "video-camera", "speedometer", "open-book", "dragon-spiral", "laurel-crown",
 );
 
-macro_rules! masks {
-    ($($name:literal),* $(,)?) => {
-        const MASKS: &[(&str, &[u8])] = &[$(($name, include_bytes!(concat!("../art/game/", $name, ".png")))),*];
-    };
+/// Folders of masks cut from the user's own game installs, by name prefix (`"dl-"` →
+/// `<data>/deadlock/masks`). Nothing from a game ships with us: `masterhub-games setup` writes
+/// these, and keys fall back to their glyph while they are missing.
+static MASK_DIRS: Mutex<Vec<(&'static str, std::path::PathBuf)>> = Mutex::new(Vec::new());
+
+/// Where masks named `<prefix>…` live (`<dir>/<name>.png`, grey, any size).
+pub fn set_mask_dir(prefix: &'static str, dir: std::path::PathBuf) {
+    let mut d = MASK_DIRS.lock().unwrap();
+    d.retain(|(p, _)| *p != prefix);
+    d.push((prefix, dir));
 }
 
-// Icons cut from the user's own screenshots of Crimson Desert (see `art/CREDITS.md`): grey
-// PNG masks, 128 px. For this hub only; they must not be published.
-masks!(
-    "cd-backpack", "cd-sword", "cd-emblem", "cd-discovery", "cd-photo", "cd-gear", "cd-book", "cd-tab-pot",
-    "cd-tab-scroll", "cd-star", "cd-save", "cd-compass", "cd-horseshoes", "cd-skill", "cd-flame",
-    // Deadlock: the game's own vector icons, cut by games/deadlock/tools/icons.py.
-    "dl-ap", "dl-binoculars", "dl-book", "dl-cart", "dl-chat", "dl-check", "dl-cursor", "dl-down", "dl-download", "dl-eye", "dl-eye-off", "dl-mic-off", "dl-faster", "dl-gear", "dl-globe", "dl-graph", "dl-grid", "dl-gun", "dl-keyboard", "dl-left", "dl-list", "dl-logo-inner", "dl-logo-outer", "dl-logo", "dl-meter", "dl-pause", "dl-play", "dl-player", "dl-quickbuy", "dl-refresh", "dl-right", "dl-slower", "dl-soul", "dl-sound", "dl-sound-off", "dl-spirit", "dl-star", "dl-survival", "dl-team", "dl-ult", "dl-up", "dl-watch", "dl-x",
-);
-
 pub fn names() -> Vec<&'static str> {
-    ART.iter().map(|(n, _)| *n).chain(MASKS.iter().map(|(n, _)| *n)).collect()
+    ART.iter().map(|(n, _)| *n).collect()
 }
 
 /// Whether `name` is a cut-out from the game (a mask), not a drawing.
 pub fn from_game(name: &str) -> bool {
-    MASKS.iter().any(|(n, _)| *n == name)
+    mask_of(name).is_some()
 }
 
 fn mask_of(name: &str) -> Option<&'static image::GrayImage> {
-    static CACHE: OnceLock<HashMap<&'static str, image::GrayImage>> = OnceLock::new();
-    CACHE
-        .get_or_init(|| MASKS.iter().filter_map(|(n, png)| Some((*n, image::load_from_memory(png).ok()?.into_luma8()))).collect())
-        .get(name)
+    static CACHE: OnceLock<Mutex<HashMap<String, Option<&'static image::GrayImage>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(m) = cache.lock().unwrap().get(name) {
+        return *m;
+    }
+    let dir = MASK_DIRS.lock().unwrap().iter().find(|(p, _)| name.starts_with(p)).map(|(_, d)| d.clone());
+    let m = dir
+        .and_then(|d| image::open(d.join(format!("{name}.png"))).ok())
+        .map(|img| &*Box::leak(Box::new(img.into_luma8())));
+    cache.lock().unwrap().insert(name.to_owned(), m);
+    m
 }
 
 fn mask_cover(mask: &image::GrayImage, w: usize, h: usize, size: f32, cx: f32, cy: f32) -> Cover {

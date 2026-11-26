@@ -1,7 +1,7 @@
 //! The game look for WoW Forever, built from the game's own material: its spell and item icons
 //! (full colour), Friz Quadrata and Morpheus, the XP bar's purple, the minimap's bronze and the
 //! zone map itself. Everything is read at run time from the files extracted by
-//! games/wow_forever/tools/extract.py (`~/.local/share/pulpit/wow-src`, `PULPIT_WOW_SRC`
+//! the user's own install by `masterhub-games setup wow_forever` (`set_wow_src`
 //! overrides); it is the game's artwork, for this hub only, never published or committed.
 //! Parts have variants ([`WowStyle`]) for a proposals board.
 //!
@@ -104,15 +104,14 @@ fn noise(x: f32, y: f32, seed: u32) -> f32 {
 
 /// The folder of extracted game files.
 pub(crate) fn src_dir() -> Option<PathBuf> {
-    std::env::var_os("PULPIT_WOW_SRC")
-        .map(PathBuf::from)
-        .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/share/pulpit/wow-src")))
+    crate::text::wow_src()
 }
 
 /// A picture from the extracted files (`icons/<name>.png`, `maps/<name>.png`), resized to
 /// `w`×`h`, cached.
 pub(crate) fn picture(folder: &str, name: &str, w: u32, h: u32) -> Option<RgbaImage> {
-    static CACHE: OnceLock<Mutex<HashMap<(String, u32, u32), Option<RgbaImage>>>> = OnceLock::new();
+    type Cache = Mutex<HashMap<(String, u32, u32), Option<RgbaImage>>>;
+    static CACHE: OnceLock<Cache> = OnceLock::new();
     let key = (format!("{folder}/{name}"), w, h);
     let cache = CACHE.get_or_init(Default::default);
     if let Some(v) = cache.lock().ok()?.get(&key) {

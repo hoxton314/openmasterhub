@@ -3,8 +3,9 @@
 //! On a controller the menu shortcuts (map, inventory, skills, journal, photo mode) are
 //! unassigned, so these keys are the short way to them. Game-side files: games/crimson_desert.
 
-use pulpit_render::{CrimsonFont, CrimsonFrame, CrimsonIcons, CrimsonPress, CrimsonRing, CrimsonStyle, IntroStyle, Theme};
+use masterhub_games_render::{CrimsonFont, CrimsonFrame, CrimsonIcons, CrimsonPress, CrimsonRing, CrimsonStyle, IntroStyle, Theme};
 
+use crate::ctx::{Clip, Ctx, steam_class};
 use crate::game::{Game, Kind, Page, Palette, Press, ka};
 
 /// The look after the game's menus: the parts the user picked on the proposals board on 2026-11-23
@@ -21,37 +22,35 @@ const GOLD: [u8; 3] = [0xC8, 0x96, 0x2E];
 const CRIMSON: [u8; 3] = [0xC2, 0x38, 0x2C];
 const BONE: [u8; 3] = [0xC9, 0xBF, 0xA8];
 
-const MAP: &str = "~/Repos/PULPIT/scripts/pulpit-exec ~/Repos/PULPIT/games/crimson_desert/tools/map.sh";
-const REC_SAVE: &str = "~/Repos/PULPIT/scripts/pulpit-exec ~/.local/bin/kreatura-rec save";
-const REC_REPLAY: &str = "~/Repos/PULPIT/scripts/pulpit-exec ~/.local/bin/kreatura-rec replay";
-const REC_RECORD: &str = "~/Repos/PULPIT/scripts/pulpit-exec ~/.local/bin/kreatura-rec record";
+/// The community map the WEB MAP key opens.
+const MAP: &str = "https://crimsondesert.th.gl/";
 
-pub fn game() -> Game {
+pub fn game(ctx: &Ctx) -> Game {
     use Kind::*;
     use Press::*;
     let ico = |c: u32| char::from_u32(c).unwrap_or(' ');
     // Gold = the game's menus, crimson = actions in the world, bone = our own tools.
     let keys = vec![
-        ka("MAP", ico(0xf8ed), "cd-compass|treasure-map", Action, Keys("m")),
-        ka("INVENTORY", ico(0xf1e7), "cd-backpack|knapsack", Action, Keys("i")),
-        ka("JOURNAL", ico(0xfb8a), "cd-book|scroll-unfurled", Action, Keys("j")),
-        ka("SKILLS", ico(0xfc0b), "cd-skill|star-swirl", Action, Keys("k")),
-        ka("PHOTO", ico(0xf344), "cd-photo|photo-camera", Action, Keys("p")),
-        ka("MOUNT", ico(0xf7b1), "cd-horseshoes|horse-head", Toggle, Keys("1")),
-        ka("WEAPON", ico(0xfd08), "cd-sword|crossed-swords", Toggle, Keys("2")),
-        ka("FOOD", ico(0xf59a), "cd-tab-pot|chicken-leg", Toggle, Keys("3")),
-        ka("ELEMENT", ico(0xf689), "cd-flame|flame", Toggle, Keys("4")),
-        ka("MENU", ico(0xf916), "cd-gear|hamburger-menu", Action, Keys("esc")),
-        ka("WEB MAP", ico(0xf275), "cd-star|compass", Cheat, Cmd(MAP)),
-        ka("SAVE CLIP", ico(0xfaf3), "film-strip", Cheat, Cmd(REC_SAVE)),
-        ka("REPLAY", ico(0xf7c1), "backward-time", Cheat, Cmd(REC_REPLAY)),
-        ka("RECORD", ico(0xfe96), "video-camera", Cheat, Cmd(REC_RECORD)),
-        ka("FPS HUD", ico(0xfd25), "speedometer", Cheat, Keys("rightshift+f12@150")),
+        ka("MAP", ico(0xf279), "treasure-map", Action, Keys("m")),
+        ka("INVENTORY", ico(0xf0f2), "knapsack", Action, Keys("i")),
+        ka("JOURNAL", ico(0xf70e), "scroll-unfurled", Action, Keys("j")),
+        ka("SKILLS", ico(0xf6e8), "star-swirl", Action, Keys("k")),
+        ka("PHOTO", ico(0xf030), "photo-camera", Action, Keys("p")),
+        ka("MOUNT", ico(0xf7ab), "horse-head", Toggle, Keys("1")),
+        ka("WEAPON", ico(0xf6de), "crossed-swords", Toggle, Keys("2")),
+        ka("FOOD", ico(0xf6d7), "chicken-leg", Toggle, Keys("3")),
+        ka("ELEMENT", ico(0xf06d), "flame", Toggle, Keys("4")),
+        ka("MENU", ico(0xf0c9), "hamburger-menu", Action, Keys("esc")),
+        ka("WEB MAP", ico(0xf558), "compass", Cheat, Open(MAP)),
+        ka("SAVE CLIP", ico(0xf111), "film-strip", Cheat, ctx.clip(Clip::Save)),
+        ka("REPLAY", ico(0xf252), "backward-time", Cheat, ctx.clip(Clip::Replay)),
+        ka("RECORD", ico(0xf03d), "video-camera", Cheat, ctx.clip(Clip::Record)),
+        ka("FPS HUD", ico(0xf625), "speedometer", Cheat, Keys("rightshift+f12@150")),
     ];
     Game {
         claim_name: "pulpit-crimson-desert",
         title: "CRIMSON DESERT",
-        class: "steam_app_3321460",
+        class: steam_class(3321460, "CrimsonDesert.exe"),
         process: "CrimsonDesert.exe",
         theme: THEME,
         palette: Palette {
@@ -66,7 +65,6 @@ pub fn game() -> Game {
         combat_page: None,
         favs_file: None,
         loadouts_file: None,
-        panel: None,
         feed: None,
     }
 }

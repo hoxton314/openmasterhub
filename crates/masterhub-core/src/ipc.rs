@@ -18,6 +18,7 @@
 //! | `set_status` | `source`, `status`, `pid`, `background`, `detail` | set (or clear, `status: null`) a tool's [`Status`] |
 //! | `get_open_apps` | | window classes (`.exe` names on Windows) of open windows, sorted |
 //! | `get_audio` | | [`AudioInfo`]: apps playing audio, output and input devices |
+//! | `get_volume` | | `{level, muted}` of the default output (level 0..=1) |
 //! | `get_sessions` | | open Claude Code sessions, `Vec<SessionInfo>` (also the `sessions` event) |
 //! | `claim` | `name`, `controls`, `apps`, `priority` | take over controls (live surface), `{"claim": id}` |
 //! | `release` | `claim` | give them back |
@@ -205,6 +206,8 @@ pub enum Request {
     },
     GetOpenApps,
     GetAudio,
+    /// The default output's volume: `{"level": 0.4, "muted": false}`.
+    GetVolume,
     /// The open Claude Code sessions, in slot order (`Vec<SessionInfo>`).
     GetSessions,
     /// Take over controls; the result is `{"claim": id}`. See the module docs.

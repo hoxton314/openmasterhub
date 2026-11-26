@@ -27,7 +27,7 @@ pub enum FontId {
     /// renderer starts (it is not ours to bundle); Chakra Petch stands in when the game is gone.
     Retail = 7,
     /// Friz Quadrata, WoW's interface face, read from the extracted game files
-    /// (`~/.local/share/pulpit/wow-src/fonts`); Cinzel stands in without them.
+    /// (`set_wow_src`); Cinzel stands in without them.
     Friz = 8,
     /// Morpheus, WoW's title face (quest titles, zone names); IM Fell stands in.
     Morpheus = 9,
@@ -39,31 +39,47 @@ const BUILTIN: [&[u8]; 7] = [
     include_bytes!("../fonts/ChakraPetch-Bold.ttf"),
     include_bytes!("../fonts/ShareTechMono-Regular.ttf"),
     include_bytes!("../fonts/BebasNeue-Regular.ttf"),
-    include_bytes!("../fonts/uicons-solid-rounded.ttf"),
+    include_bytes!("../fonts/fa-solid-900.ttf"),
     include_bytes!("../fonts/IMFellEnglishSC.ttf"),
     include_bytes!("../fonts/Cinzel-Bold.ttf"),
     include_bytes!("../fonts/CormorantSC-Bold.ttf"),
 ];
 
-/// Deadlock's display face from the game's own files (`PULPIT_DEADLOCK_FONT` overrides the path).
+/// Files from the user's own game installs that some looks draw with (set before the first
+/// [`Fonts::load`]); none of them ships with us.
+static GAME_FILES: std::sync::Mutex<GameFiles> = std::sync::Mutex::new(GameFiles { deadlock_font: None, wow_src: None });
+
+struct GameFiles {
+    deadlock_font: Option<std::path::PathBuf>,
+    wow_src: Option<std::path::PathBuf>,
+}
+
+/// Deadlock's display face in the user's install (`.../panorama/fonts/retaildemo-bold.otf`).
+pub fn set_deadlock_font(path: std::path::PathBuf) {
+    GAME_FILES.lock().unwrap().deadlock_font = Some(path);
+}
+
+/// The folder WoW's files were extracted to (`fonts/`, `maps/`, `icons/`, ...).
+pub fn set_wow_src(dir: std::path::PathBuf) {
+    GAME_FILES.lock().unwrap().wow_src = Some(dir);
+}
+
+pub(crate) fn wow_src() -> Option<std::path::PathBuf> {
+    GAME_FILES.lock().unwrap().wow_src.clone()
+}
+
+/// Deadlock's display face from the game's own files; Chakra Petch without them.
 fn game_font() -> &'static [u8] {
-    let path = std::env::var_os("PULPIT_DEADLOCK_FONT").map(std::path::PathBuf::from).or_else(|| {
-        let home = std::path::PathBuf::from(std::env::var_os("HOME")?);
-        Some(home.join(".local/share/Steam/steamapps/common/Deadlock/game/citadel/panorama/fonts/retaildemo-bold.otf"))
-    });
+    let path = GAME_FILES.lock().unwrap().deadlock_font.clone();
     match path.and_then(|p| std::fs::read(p).ok()) {
         Some(bytes) => Box::leak(bytes.into_boxed_slice()),
         None => BUILTIN[0],
     }
 }
 
-/// A WoW font from the files extracted by games/wow_forever/tools/extract.py
-/// (`PULPIT_WOW_SRC` overrides the folder); `None` when they are not there.
+/// A WoW font from the extracted game files; `None` when they are not there.
 fn wow_font(file: &str) -> Option<&'static [u8]> {
-    let dir = std::env::var_os("PULPIT_WOW_SRC").map(std::path::PathBuf::from).or_else(|| {
-        Some(std::path::PathBuf::from(std::env::var_os("HOME")?).join(".local/share/pulpit/wow-src"))
-    })?;
-    std::fs::read(dir.join("fonts").join(file)).ok().map(|b| &*Box::leak(b.into_boxed_slice()))
+    std::fs::read(wow_src()?.join("fonts").join(file)).ok().map(|b| &*Box::leak(b.into_boxed_slice()))
 }
 
 /// Text faces get their cap height snapped to whole pixels (see [`Fonts::scaled`]); the icon

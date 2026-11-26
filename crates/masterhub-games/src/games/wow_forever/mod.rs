@@ -12,13 +12,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use pulpit_render::{DialCard, IntroStyle, Theme, WowFrame, WowPress, WowRing, WowStyle};
+use masterhub_games_render::{DialCard, IntroStyle, Theme, WowFrame, WowPress, WowRing, WowStyle};
 
+use crate::ctx::{Clip, Ctx};
 use crate::game::{Feed, GKey, Game, KeyPatch, Kind, Page, Palette, Press, Stat};
-
-const REC_SAVE: &str = "~/Repos/PULPIT/scripts/pulpit-exec ~/.local/bin/kreatura-rec save";
-const REC_REPLAY: &str = "~/Repos/PULPIT/scripts/pulpit-exec ~/.local/bin/kreatura-rec replay";
-const REC_RECORD: &str = "~/Repos/PULPIT/scripts/pulpit-exec ~/.local/bin/kreatura-rec record";
 
 /// (ground, light) per kind of key: stand-in colours until the look round.
 type Tint = ([u8; 3], [u8; 3]);
@@ -31,9 +28,27 @@ const XP: [u8; 3] = [0xA3, 0x6B, 0xFF];
 const RED: [u8; 3] = [0xE0, 0x3A, 0x2E];
 const GOLD: [u8; 3] = [0xF0, 0xC7, 0x5E];
 
+/// The game's folders, set once by [`game`]: the install (`.../World of Warcraft/_forever_`)
+/// and our data folder for this game (extracted assets, the strip's reading).
+static DIRS: std::sync::OnceLock<(PathBuf, PathBuf)> = std::sync::OnceLock::new();
+
 fn install() -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    home.join("Games/battlenet/drive_c/Program Files (x86)/World of Warcraft/_forever_")
+    DIRS.get().map(|d| d.0.clone()).unwrap_or_default()
+}
+
+/// Assets extracted from the user's own install (`masterhub-games setup wow_forever`).
+fn extracted() -> Option<PathBuf> {
+    DIRS.get().map(|d| d.1.join("src"))
+}
+
+/// Where Battle.net puts WoW Forever by default (under Wine on Linux).
+fn default_install() -> PathBuf {
+    let base = if cfg!(windows) {
+        PathBuf::from(r"C:\Program Files (x86)")
+    } else {
+        dirs::home_dir().unwrap_or_default().join("Games/battlenet/drive_c/Program Files (x86)")
+    };
+    base.join("World of Warcraft/_forever_")
 }
 
 /// The client's default keys for the actions the pages use (WoW binding names).
@@ -253,7 +268,7 @@ impl WowFeed {
     fn new() -> Self {
         let want = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let dir = install().join("Logs");
-        let zones = pulpit_render_src()
+        let zones = extracted()
             .and_then(|d| std::fs::read_to_string(d.join("maps/zones.json")).ok())
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
@@ -298,28 +313,17 @@ impl WowFeed {
                 }
             }
         }
-        // Icons not extracted yet: fetch them from the game files in the background.
-        let dir = pulpit_render_src().map(|d| d.join("icons"));
-        let missing: Vec<u64> = self
+        // Spell icons come from the user's own install; without them the keys show labels.
+        let dir = extracted().map(|d| d.join("icons"));
+        let missing = self
             .slots
             .values()
             .filter_map(saved::Slot::icon_id)
             .filter(|id| !self.asked_icons.contains(id) && dir.as_ref().is_some_and(|d| !d.join(format!("fdid_{id}.png")).exists()))
-            .collect();
-        if !missing.is_empty() {
-            self.asked_icons.extend(missing.iter().copied());
-            let script = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join("Repos/PULPIT/games/wow_forever/tools/extract.py");
-            let mut cmd = std::process::Command::new("python3");
-            cmd.arg("-I").arg(script);
-            for id in &missing {
-                cmd.arg("--fdid").arg(id.to_string());
-            }
-            match cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() {
-                Ok(mut child) => {
-                    std::thread::spawn(move || child.wait());
-                }
-                Err(e) => log::warn!("wow icons: {e}"),
-            }
+            .count();
+        if missing > 0 {
+            self.asked_icons.extend(self.slots.values().filter_map(saved::Slot::icon_id));
+            log::info!("wow: {missing} bar icons not extracted (masterhub-games setup wow_forever)");
         }
         log::info!("wow: add-on save read ({} bar slots)", self.slots.len());
         self.save = Some((m, snap));
@@ -381,10 +385,11 @@ impl WowFeed {
     }
 }
 
-/// The strip's reading for the helper panel (`~/.local/share/pulpit/wow-live.json`).
+/// The strip's reading for a helper panel (`live.json` in the game's data folder).
 fn write_live(l: &strip::Live) {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return };
-    let path = home.join(".local/share/pulpit/wow-live.json");
+    let Some(dir) = DIRS.get().map(|d| d.1.clone()) else { return };
+    let _ = std::fs::create_dir_all(&dir);
+    let path = dir.join("live.json");
     let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64());
     let v = serde_json::json!({
         "at": unix, "level": l.level, "xp": l.xp, "xpmax": l.xp_max, "rested": l.rested, "money": l.money,
@@ -401,12 +406,6 @@ fn rate_per_hour(q: &std::collections::VecDeque<(Instant, f64)>) -> Option<f64> 
     let first = q.front()?.0;
     let secs = first.elapsed().as_secs_f64().max(300.0);
     Some(q.iter().map(|(_, v)| *v).sum::<f64>() * 3600.0 / secs)
-}
-
-fn pulpit_render_src() -> Option<PathBuf> {
-    std::env::var_os("PULPIT_WOW_SRC")
-        .map(PathBuf::from)
-        .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".local/share/pulpit/wow-src")))
 }
 
 fn short(n: f64) -> String {
@@ -583,8 +582,11 @@ impl Feed for WowFeed {
     }
 }
 
-pub fn game() -> Game {
+pub fn game(ctx: &Ctx) -> Game {
     use Press::*;
+    let install = ctx.install.clone().unwrap_or_else(default_install);
+    let _ = DIRS.set((install, ctx.data.clone()));
+    masterhub_games_render::set_wow_src(ctx.data.join("src"));
     let b = Binds::load();
     let key = |label: &'static str, tint: Tint, press| GKey { label, icon: ' ', kind: Kind::Action, press, minor: None, art: None, stat: None, tint: Some(tint), on: None };
     // A game action: its bind, or a dimmed key saying it has none.
@@ -598,7 +600,7 @@ pub fn game() -> Game {
     };
     let travel = |n: u32, label: &'static str| act(label, &format!("MULTIACTIONBAR2BUTTON{n}"), TRAVEL);
     let stat = |label, stat, tint: Tint| GKey { stat: Some(stat), ..key(label, tint, Show) };
-    let clip = || key("SAVE CLIP", TOOL, Cmd(REC_SAVE));
+    let clip = || key("SAVE CLIP", TOOL, ctx.clip(Clip::Save));
 
     let play = vec![
         act("BAGS", "OPENALLBAGS", WINDOW),
@@ -658,16 +660,16 @@ pub fn game() -> Game {
         act("SCREENSHOT", "SCREENSHOT", TOOL),
         act("HIDE UI", "TOGGLEUI", TOOL),
         clip(),
-        key("REPLAY", TOOL, Cmd(REC_REPLAY)),
-        key("RECORD", TOOL, Cmd(REC_RECORD)),
+        key("REPLAY", TOOL, ctx.clip(Clip::Replay)),
+        key("RECORD", TOOL, ctx.clip(Clip::Record)),
         stat("TIME", Stat::Time, WINDOW),
         stat("SESSION", Stat::Session, WINDOW),
         stat("", Stat::Date, WINDOW),
         stat("GPU TEMP", Stat::GpuTemp, TOOL),
         stat("VRAM GB", Stat::Vram, TOOL),
-        GKey { icon: '\u{fcc9}', ..key("PREVIOUS", TRAVEL, Cmd("playerctl -p playerctld previous")) },
-        GKey { stat: Some(Stat::Track), icon: '\u{fa7e}', ..key("", TRAVEL, Cmd("playerctl -p playerctld play-pause")) },
-        GKey { icon: '\u{fcca}', ..key("NEXT", TRAVEL, Cmd("playerctl -p playerctld next")) },
+        GKey { icon: '\u{f048}', ..key("PREVIOUS", TRAVEL, Keys("previoussong")) },
+        GKey { stat: Some(Stat::Track), icon: '\u{f144}', ..key("", TRAVEL, Keys("playpause")) },
+        GKey { icon: '\u{f051}', ..key("NEXT", TRAVEL, Keys("nextsong")) },
         stat("CPU", Stat::Cpu, TOOL),
         stat("GPU LOAD", Stat::GpuLoad, TOOL),
     ];
@@ -710,7 +712,10 @@ pub fn game() -> Game {
                     // Bar slots show what the add-on saw on the bar; until then, an empty slot.
                     k.art = art(k.label).or((k.label.starts_with("BAR ") || k.label.starts_with("TRAVEL ")).then_some("wow:empty-slot"));
                 }
-                if let (Keys(c), None) = (k.press, k.minor) {
+                // Media keys are ours, not the game's: no hotkey hint.
+                if let (Keys(c), None) = (k.press, k.minor)
+                    && !matches!(c, "previoussong" | "playpause" | "nextsong" | "mute")
+                {
                     k.minor = Some(Box::leak(hotkey(c).into_boxed_str()));
                 }
                 k
@@ -723,7 +728,7 @@ pub fn game() -> Game {
         title: "WOW FOREVER",
         // The Lutris/umu launcher names every window of the Battle.net prefix the same (Diablo IV,
         // WC3, the launcher itself), so the title picks WoW (engine `class@title` pattern).
-        class: "steam_app_battlenet@World of Warcraft",
+        class: if cfg!(windows) { "Wow.exe".into() } else { "steam_app_battlenet@World of Warcraft".into() },
         process: "Wow.exe",
         theme: THEME,
         palette: Palette { action: WINDOW, cheat: TOOL, toggle: TRAVEL, ring: XP },
@@ -733,8 +738,6 @@ pub fn game() -> Game {
         combat_page: Some(1),
         favs_file: None,
         loadouts_file: None,
-        // The levelling helper on the monitor without the game (games/wow_forever/tools/panel.*).
-        panel: Some("~/Repos/PULPIT/scripts/pulpit-exec ~/Repos/PULPIT/games/wow_forever/tools/panel.sh"),
         feed: Some(Box::new(WowFeed::new())),
     }
 }

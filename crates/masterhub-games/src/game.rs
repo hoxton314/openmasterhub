@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use image::RgbImage;
 use masterhub_core::config::Action;
 use masterhub_core::ipc::{ClientEvent, Controls, Event, InputMsg, TARGET_DIAL};
-use pulpit_render::{DialCard, DialFace, IntroStyle, KeyFace, Orb, PRESS_SECS, Renderer, Theme};
+use masterhub_games_render::{DialCard, DialFace, IntroStyle, KeyFace, Orb, PRESS_SECS, Renderer, Theme};
 
 use crate::bridge::{Bridge, Stats};
 use crate::hub::Hub;
@@ -69,6 +69,10 @@ pub enum Press {
     Keys(&'static str),
     /// A shell command.
     Cmd(&'static str),
+    /// Open a web page in the default browser.
+    Open(&'static str),
+    /// A clip key without a command in `[clips]`: shows that it is not set.
+    Unset,
     /// A bridge command.
     Bridge(&'static str),
     /// Open the eddies amount picker on the dial (a second press gives).
@@ -204,8 +208,9 @@ pub struct Game {
     pub claim_name: &'static str,
     /// The name on the dial.
     pub title: &'static str,
-    /// Window class glob of the game.
-    pub class: &'static str,
+    /// Window class glob of the game (`class@title` also matches the title; an exe name on
+    /// Windows). The config's `class` replaces it.
+    pub class: String,
     /// Text in the game's command line (Wine renames the process, so not its name).
     pub process: &'static str,
     pub theme: Theme,
@@ -221,8 +226,6 @@ pub struct Game {
     pub favs_file: Option<PathBuf>,
     /// Spawn panel loadout sets, shown on the `loadouts` page.
     pub loadouts_file: Option<PathBuf>,
-    /// Opens the spawn panel; run when the game starts.
-    pub panel: Option<&'static str>,
     /// Live readouts from files the game writes (logs, add-on saves), for games without a bridge.
     pub feed: Option<Box<dyn Feed>>,
 }
@@ -253,18 +256,8 @@ pub struct KeyPatch {
     pub cooldown: Option<f32>,
 }
 
-/// Window classes of the games switched on (set once at start).
-static CLASSES: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
-
-/// Whether `class` is the window of a game whose mode is switched on.
-pub fn is_game(class: &str) -> bool {
-    // A `class@title` pattern counts by its class here.
-    CLASSES.get().is_some_and(|c| c.iter().any(|g| masterhub_core::config::glob_match(g.split('@').next().unwrap_or(g), class)))
-}
-
 /// Start the mode of every game in `games`, each on its own thread.
 pub fn spawn_all(games: Vec<Game>) {
-    let _ = CLASSES.set(games.iter().map(|g| g.class).collect());
     games.into_iter().for_each(spawn);
 }
 
@@ -272,7 +265,7 @@ pub fn spawn_all(games: Vec<Game>) {
 /// without the hub: `pulpit sheet NAME OUT.png`.
 pub fn sheet(game: &Game, renderer: &Renderer) -> RgbImage {
     const S: u32 = 3;
-    let cell = pulpit_render::KEY_SIZE * S + 12;
+    let cell = masterhub_games_render::KEY_SIZE * S + 12;
     let pages: Vec<&Page> = game.pages.iter().filter(|p| !p.favs && !p.loadouts).collect();
     let mut out = RgbImage::from_pixel(5 * cell + 12, pages.len() as u32 * (3 * cell + 24) + 12, image::Rgb([8, 8, 10]));
     for (pi, page) in pages.iter().enumerate() {
@@ -329,6 +322,7 @@ fn spawn(game: Game) {
 
 /// The running game's process id: the first process whose command starts with a path
 /// ending in `exe` (Wine and Proton keep the Windows path there).
+#[cfg(not(windows))]
 fn game_pid(exe: &str) -> Option<u32> {
     std::fs::read_dir("/proc").ok()?.flatten().find_map(|e| {
         let pid: u32 = e.file_name().to_str()?.parse().ok()?;
@@ -338,12 +332,20 @@ fn game_pid(exe: &str) -> Option<u32> {
     })
 }
 
-/// The default sink's volume (0..1) and mute, read once at the start of a dial turn.
-fn read_volume() -> (f32, bool) {
-    let out = std::process::Command::new("wpctl").args(["get-volume", "@DEFAULT_AUDIO_SINK@"]).output();
-    let s = out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
-    let v = s.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0.0);
-    (v, s.contains("MUTED"))
+/// The running game's process id, by its exe name (`tasklist`).
+#[cfg(windows)]
+fn game_pid(exe: &str) -> Option<u32> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let filter = format!("IMAGENAME eq {exe}");
+    let out = std::process::Command::new("tasklist").args(["/FI", &filter, "/FO", "CSV", "/NH"]).creation_flags(CREATE_NO_WINDOW).output().ok()?;
+    // "deadlock.exe","1234","Console","1","1,234 K"
+    String::from_utf8_lossy(&out.stdout).lines().find_map(|l| l.split('"').nth(3)?.parse().ok())
+}
+
+/// A shell command that opens `url` in the default browser.
+fn open_cmd(url: &str) -> String {
+    if cfg!(windows) { format!("start \"\" \"{url}\"") } else { format!("xdg-open '{url}'") }
 }
 
 /// 85749 → "85,749".
@@ -464,7 +466,7 @@ impl Mode {
         while let Ok(ev) = self.hub.events.try_recv() {
             match ev {
                 ClientEvent::Online(true) => {
-                    match self.hub.claim_apps(self.game.claim_name, Self::controls(), vec![self.game.class.into()], PRIORITY) {
+                    match self.hub.claim_apps(self.game.claim_name, Self::controls(), vec![self.game.class.clone()], PRIORITY) {
                         Ok(id) => log::info!("game mode {}: claim #{id}", self.game.claim_name),
                         Err(e) => log::error!("game claim failed: {e:#}"),
                     }
@@ -500,10 +502,6 @@ impl Mode {
             if self.intro_pid != Some(p) {
                 self.intro_pid = Some(p);
                 self.intro = Some(Instant::now());
-                // A new game process: open the spawn panel on the second monitor.
-                if let Some(cmd) = self.game.panel {
-                    self.hub.run(Action::Cmd(cmd.into()), None);
-                }
             }
         }
         log::info!("game mode active (pid {pid:?})");
@@ -568,13 +566,14 @@ impl Mode {
                 match press {
                     Press::Keys(k) => self.hub.run(Action::Keys(k.into()), None),
                     Press::Cmd(c) => self.hub.run(Action::Cmd(c.into()), None),
+                    Press::Open(url) => self.hub.run(Action::Cmd(open_cmd(url)), None),
                     Press::Bridge(c) if self.bridge_up() => self.send(c, ""),
                     Press::Bridge(_) => {}
                     Press::Amount if self.bridge_up() => match self.amount {
                         Some((idx, _)) => self.give(idx),
                         None => self.amount = Some((self.amount_idx, Instant::now())),
                     },
-                    Press::Amount | Press::Show => {}
+                    Press::Amount | Press::Show | Press::Unset => {}
                 }
             }
             ("roller", ev) if i.index == 0 => {
@@ -593,7 +592,7 @@ impl Mode {
                 }
                 let (v, m) = match self.volume {
                     Some((v, m, at)) if at.elapsed() < SHOWN => (v, m),
-                    _ => read_volume(),
+                    _ => self.hub.volume().unwrap_or((0.0, false)),
                 };
                 let v = (v + if up { 0.02 } else { -0.02 }).clamp(0.0, 1.0);
                 self.hub.run(Action::Volume(if up { "+2" } else { "-2" }.into()), None);
@@ -665,7 +664,7 @@ impl Mode {
         }
         KeyFace {
             label: f.name.to_uppercase(),
-            icon: char::from_u32(if f.car { 0xf366 } else { 0xf6e2 }),
+            icon: char::from_u32(if f.car { 0xf1b9 } else { 0xf3a5 }),
             minor: Some(minor),
             ground: Some(ground),
             accent: Some(accent),
@@ -698,7 +697,7 @@ impl Mode {
         }
         KeyFace {
             label: lo.name.to_uppercase(),
-            icon: char::from_u32(0xfe78),
+            icon: char::from_u32(0xf007),
             minor: Some(minor),
             orb,
             ground: Some(ground),
@@ -724,7 +723,11 @@ impl Mode {
             minor: key.minor.map(Into::into),
             ..Default::default()
         };
-        if needs_bridge && !self.bridge_up() {
+        if matches!(key.press, Press::Unset) {
+            ground = [0x10, 0x10, 0x13];
+            accent = [0x40, 0x40, 0x48];
+            f.minor = Some("NOT SET".into());
+        } else if needs_bridge && !self.bridge_up() {
             ground = [0x10, 0x10, 0x13];
             accent = [0x40, 0x40, 0x48];
             f.minor = Some("CET OFFLINE".into());
