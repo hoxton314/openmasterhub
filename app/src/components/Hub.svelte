@@ -50,6 +50,12 @@
     e.stopPropagation();
     hub.selection = s;
   };
+  /** Enter or Space selects a control, as a click does. */
+  const keySel = (s: Selection) => (e: KeyboardEvent) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    hub.selection = s;
+  };
   const isSel = (s: Selection) => JSON.stringify(hub.selection) === JSON.stringify(s);
   const flash = (serial: string, control: string, index: number) => hub.flashes[flashKey(serial, control, index)];
 </script>
@@ -82,7 +88,7 @@
           {@const [x, y, s] = keyRect(i)}
           {@const src = hub.displays[displayKey(m.serial, i)]}
           {@const selected = isSel({ kind: 'key', index: i })}
-          <g class="control" class:selected onclick={sel({ kind: 'key', index: i })} role="presentation">
+          <g class="control" class:selected onclick={sel({ kind: 'key', index: i })} onkeydown={keySel({ kind: 'key', index: i })} role="button" tabindex="0" aria-label={`Key ${i + 1}`}>
             <rect class="slot" x={x} y={y} width={s} height={s} rx="0.08" />
             {#if src}<image href={src} x={x} y={y} width={s} height={s} clip-path="url(#key-clip)" preserveAspectRatio="none" />{/if}
             <rect class="outline" x={x} y={y} width={s} height={s} rx="0.08" />
@@ -93,7 +99,7 @@
         {/each}
       {:else if m.kind === 'dial'}
         {@const src = hub.displays[displayKey(m.serial, TARGET_DIAL)]}
-        <g class="control" class:selected={isSel({ kind: 'dial' })} onclick={sel({ kind: 'dial' })} role="presentation">
+        <g class="control" class:selected={isSel({ kind: 'dial' })} onclick={sel({ kind: 'dial' })} onkeydown={keySel({ kind: 'dial' })} role="button" tabindex="0" aria-label={'Dial'}>
           <circle class="ring" cx="1" cy="1" r="0.78" />
           {#each Array(60) as _, i}
             {@const a = (i / 60) * Math.PI * 2}
@@ -109,7 +115,7 @@
       {:else if m.kind === 'knob'}
         {#each KNOB_CENTERS as [cx, cy], i}
           {@const led = ledColor('knob', i)}
-          <g class="control" class:selected={isSel({ kind: 'knob', index: i })} onclick={sel({ kind: 'knob', index: i })} role="presentation">
+          <g class="control" class:selected={isSel({ kind: 'knob', index: i })} onclick={sel({ kind: 'knob', index: i })} onkeydown={keySel({ kind: 'knob', index: i })} role="button" tabindex="0" aria-label={`Knob ${i + 1}`}>
             {#if led}<circle class="led" cx={cx} cy={cy} r="0.355" stroke={led} />{/if}
             <circle class="cap" cx={cx} cy={cy} r="0.29" />
             <line class="pointer" x1={cx} y1={cy - 0.11} x2={cx} y2={cy - 0.24} />
@@ -122,7 +128,7 @@
       {:else if m.kind === 'roller'}
         {#each [['left', 0], ['right', 1]] as const as [side, idx]}
           {@const [x, y, rw, rh] = ROLLER_RECTS[side]}
-          <g class="control" class:selected={isSel({ kind: 'roller', side })} onclick={sel({ kind: 'roller', side })} role="presentation">
+          <g class="control" class:selected={isSel({ kind: 'roller', side })} onclick={sel({ kind: 'roller', side })} onkeydown={keySel({ kind: 'roller', side })} role="button" tabindex="0" aria-label={`${side === 'left' ? 'Left' : 'Right'} roller`}>
             <rect class="cap" x={x} y={y} width={rw} height={rh} rx={rh / 2} />
             {#each Array(15) as _, k}
               {@const lx = x + 0.2 + (k * (rw - 0.4)) / 14}
@@ -140,7 +146,7 @@
           {@const led = ledColor('fader', i)}
           {@const pos = (hub.faders[`${m.serial}/${i}`] ?? 50) / 100}
           {@const ky = 1.7 - pos * 1.4}
-          <g class="control" class:selected={isSel({ kind: 'fader', index: i })} onclick={sel({ kind: 'fader', index: i })} role="presentation">
+          <g class="control" class:selected={isSel({ kind: 'fader', index: i })} onclick={sel({ kind: 'fader', index: i })} onkeydown={keySel({ kind: 'fader', index: i })} role="button" tabindex="0" aria-label={`Fader ${i + 1}`}>
             <rect x={x - 0.3} y="0.15" width="0.6" height="1.7" rx="0.12" class="hit" />
             <line class="track" x1={x} y1="0.3" x2={x} y2="1.7" stroke={led ?? 'currentColor'} />
             <rect class="cap fader-cap" x={x - 0.17} y={ky - 0.1} width="0.34" height="0.2" rx="0.05" />
@@ -203,6 +209,13 @@
 
   .control {
     cursor: pointer;
+    outline: none;
+  }
+  .control:focus-visible .outline,
+  .control:focus-visible .fader-cap + .outline {
+    stroke: var(--accent-text);
+    stroke-width: 2;
+    stroke-dasharray: 3 2;
   }
   .slot {
     fill: var(--hub-empty);

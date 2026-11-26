@@ -35,13 +35,15 @@ jobs:
           cache-dependency-path: app/package-lock.json
 
       - name: Build the service
-        run: cargo build --release --locked -p masterhubd
+        run: cargo build --release --locked -p masterhubd -p masterhub-games
 
       # Tauri bundles sidecars named <name>-<target-triple>.exe from app/src-tauri/binaries.
-      - name: Stage the service as the app's sidecar
+      - name: Stage the service and the game modes as the app's sidecars
         shell: bash
         run: |
-          cp target/release/masterhubd.exe "app/src-tauri/binaries/masterhubd-$(rustc -vV | sed -n 's/^host: //p').exe"
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          cp target/release/masterhubd.exe "app/src-tauri/binaries/masterhubd-$triple.exe"
+          cp target/release/masterhub-games.exe "app/src-tauri/binaries/masterhub-games-$triple.exe"
 
       - name: Build the app and installer
         working-directory: app

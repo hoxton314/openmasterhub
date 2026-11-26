@@ -110,6 +110,15 @@ service's local socket: they draw their own key and dial images, get the inputs,
 screens and run config actions, while the config keeps working under them. Claims can follow
 the focused app. Protocol: [`docs/LIVE_SURFACE.md`](docs/LIVE_SURFACE.md).
 
+### Game modes (opt-in)
+
+Cyberpunk 2077, Deadlock, WoW Forever and Crimson Desert get their own keys, dial readouts
+and intro while they have focus (from Dawid Gorczyca's PULPIT). Every game is off until you
+switch it on in the app (sidebar → Game modes), which shows what it will install and extract
+before you approve. Nothing from any game ships with OpenMasterHUB: the look is read from
+your own install. See
+[`docs/GAME_MODES.md`](docs/GAME_MODES.md).
+
 ## Install
 
 | Platform | Package |
@@ -190,6 +199,7 @@ every option. The service reloads the file when it is edited by hand.
 | `masterhub-proto` | Wire protocol: command encoding and input decoding, no I/O |
 | `masterhub-core` | Config model, Base slot layout, face/widget rendering, IPC protocol and client |
 | `masterhubd` | Background service: drives the hardware over hidraw, profiles/pages/folders, live widgets, per-app profiles (Hyprland or KDE Plasma on Linux, focused program on Windows), local IPC for the app |
+| `masterhub-games` | Opt-in game modes over the live surface ([`docs/GAME_MODES.md`](docs/GAME_MODES.md)); `masterhub-games-render` draws their faces |
 | `app/` (`openmasterhub`) | Tauri desktop app (Svelte UI): live picture of your hub, click-to-configure editor |
 
 Protocol documentation: [`docs/PROTOCOL.md`](docs/PROTOCOL.md) and `docs/protocol-*.md`.

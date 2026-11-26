@@ -13,6 +13,8 @@ layout, `docs/ROADMAP.md` for what to do next, `docs/PROTOCOL.md` for the wire p
 - The vendor **MasterHUB** app must not run at the same time as `masterhubd`; it fights over the
   devices and can leave modules in hardware mode.
 - Keep real device serial numbers out of committed files, docs and test fixtures.
+- Never commit anything from a game (icons, fonts, textures, screenshots) or a font/icon set
+  under a paid licence: game modes read artwork from the user's install (`docs/GAME_MODES.md`).
 - The keypad is 5×3 keys of 72×72 px (indices row-major); the dial screen is 240×240.
 
 ## Building
@@ -27,8 +29,9 @@ cd app && npm run dev                                 # UI only, in a browser wi
 ```
 
 The app crate is `openmasterhub-app`. `tauri-build` requires the sidecar file
-`app/src-tauri/binaries/masterhubd-<host-triple>[.exe]` to exist; for clippy/dev an empty file is
-enough (CI touches one), for an installer copy the real `masterhubd` there.
+`app/src-tauri/binaries/masterhubd-<host-triple>[.exe]` (and, on Windows, `masterhub-games-…`)
+to exist; for clippy/dev empty files are enough (CI touches them), for an installer copy the
+real binaries there.
 
 ### Windows
 

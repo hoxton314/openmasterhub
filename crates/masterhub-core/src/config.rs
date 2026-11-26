@@ -125,6 +125,10 @@ pub struct Profile {
     /// e.g. `["obs", "steam_app_*"]`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub apps: Vec<String>,
+    /// Listed under Games in the app (`None`: when one of `apps` is a Steam game,
+    /// `steam_app_*`). Only for the app; the service treats every profile alike.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game: Option<bool>,
     /// Overrides the global LED colours while this profile is active.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leds: Option<Leds>,

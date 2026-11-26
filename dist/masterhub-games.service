@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenMasterHUB game modes (turned on per game in the app)
+PartOf=graphical-session.target
+After=graphical-session.target masterhubd.service
+Wants=masterhubd.service
+
+[Service]
+ExecStart=/usr/bin/masterhub-games
+# Waits while no game is on; reloads itself when games.toml changes.
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

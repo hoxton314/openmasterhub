@@ -171,6 +171,10 @@ fn handle(
         }
         Request::GetOpenApps => json(crate::focus::open_apps()?),
         Request::GetAudio => json(crate::audio::info()),
+        Request::GetVolume => {
+            let (level, muted) = crate::audio::get().context("no default output")?;
+            json(serde_json::json!({ "level": level, "muted": muted }))
+        }
         Request::GetSessions => json(&snapshot.lock().unwrap().sessions),
         Request::Claim { name, controls, apps, priority } => {
             if controls.is_empty() {

@@ -116,6 +116,8 @@ export interface StatusLeds {
 export interface Profile {
   name: string;
   apps?: string[];
+  /** Listed under Games; unset = when one of `apps` is a Steam game (`steam_app_*`). */
+  game?: boolean;
   leds?: Leds;
   page?: Page[];
   folder?: Page[];
@@ -204,3 +206,36 @@ export type Selection =
   | { kind: 'roller'; side: Side };
 
 export const TARGET_DIAL = 255;
+
+/** A game mode `masterhub-games` knows (docs/GAME_MODES.md). */
+export interface GameStatus {
+  game: string;
+  title: string;
+  about: string;
+  /** Steam app id: a profile following `steam_app_<id>` is the same game. */
+  steam: number | null;
+  enabled: boolean;
+  /** The configured or detected install folder. */
+  path: string | null;
+  /** Its look's assets were extracted from the user's install (or it needs none). */
+  assets: boolean;
+}
+
+/** One thing setting up a game does, shown for approval. */
+export type GameStep =
+  | { kind: 'cet_bridge'; path: string }
+  | { kind: 'deadlock_cfg'; path: string }
+  | { kind: 'deadlock_icons'; from: string; to: string }
+  | { kind: 'wow_addon'; path: string }
+  | { kind: 'enable' };
+
+export interface GamePlan {
+  game: string;
+  title: string;
+  path: string | null;
+  /** The folder was found through Steam. */
+  detected: boolean;
+  steps: GameStep[];
+  notes: string[];
+  error: string | null;
+}

@@ -18,13 +18,15 @@ name="openmasterhub-${version}-x86_64"
 rm -rf "${out:?}/$name" "$out/aur"
 mkdir -p "$out/$name" "$out/aur"
 
-install -m755 "$target/release/masterhubd" "$target/release/openmasterhub" "$out/$name/"
+install -m755 "$target/release/masterhubd" "$target/release/openmasterhub" "$target/release/masterhub-games" "$out/$name/"
 install -m644 \
   "$root/udev/70-masterhub.rules" \
   "$root/dist/masterhubd.service" \
+  "$root/dist/masterhub-games.service" \
   "$root/dist/org.openmasterhub.OpenMasterHub.desktop" \
   "$root/examples/config.toml" \
   "$root/README.md" \
+  "$root/docs/GAME_MODES.md" \
   "$root/LICENSE" \
   "$out/$name/"
 mkdir -p "$out/$name/icons"

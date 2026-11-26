@@ -1,6 +1,8 @@
 //! OpenMasterHUB desktop app: a Tauri shell around the Svelte UI. The Rust side talks to the
 //! masterhubd service and forwards its live events to the UI.
 
+mod games;
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -280,7 +282,11 @@ pub fn run() {
             open_window_classes,
             audio_info,
             start_service,
-            restart_service
+            restart_service,
+            games::games_list,
+            games::games_plan,
+            games::games_setup,
+            games::games_disable
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");

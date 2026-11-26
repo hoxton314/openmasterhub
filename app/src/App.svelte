@@ -1,11 +1,14 @@
 <script lang="ts">
-  import { AppWindow, ChevronRight, Folder, LayoutGrid, Power, RotateCw } from 'lucide-svelte';
+  import { AppWindow, ChevronDown, ChevronRight, Folder, LayoutGrid, Power, RotateCw } from 'lucide-svelte';
   import Dialog from './components/Dialog.svelte';
+  import GameDialog from './components/GameDialog.svelte';
   import Hub from './components/Hub.svelte';
   import Inspector from './components/Inspector.svelte';
   import Sidebar from './components/Sidebar.svelte';
   import { invoke } from './lib/backend';
-  import { connect, currentPage, currentProfile, hub, toast } from './lib/hub.svelte';
+  import { connect, currentPage, currentProfile, hub, showPage, toast } from './lib/hub.svelte';
+  import { games } from './lib/games.svelte';
+  import { ui } from './lib/ui.svelte';
 
   connect();
 
@@ -13,6 +16,18 @@
   const page = $derived(currentPage());
   const inFolder = $derived(!!profile?.folder?.some((f) => f.name === page?.name));
   const focused = $derived(hub.state.active_app?.split('.').pop());
+
+  const pageList = $derived([...(profile?.page ?? []).map((p) => ({ name: p.name, folder: false })), ...(profile?.folder ?? []).map((p) => ({ name: p.name, folder: true }))]);
+  let pagesOpen = $state(false);
+
+  /** Escape closes what is open, innermost first, then clears the selection. */
+  function onKey(e: KeyboardEvent) {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    if (ui.dialog || games.open) return; // the dialogs close themselves
+    if (pagesOpen) pagesOpen = false;
+    else if ((e.target as HTMLElement)?.closest?.('input, textarea, select')) return;
+    else hub.selection = { kind: 'none' };
+  }
 
   let restarting = $state(false);
   async function restartService() {
@@ -22,6 +37,8 @@
     restarting = false;
   }
 </script>
+
+<svelte:window onkeydown={onKey} onclick={() => (pagesOpen = false)} />
 
 <div class="app">
   {#if !hub.online}
@@ -38,10 +55,22 @@
         <div class="crumbs">
           <span class="muted">{profile?.name ?? 'Default'}</span>
           <ChevronRight size={13} class="faint" />
-          <span class="page">
-            {#if inFolder}<Folder size={13} />{:else}<LayoutGrid size={13} />{/if}
-            {page?.name ?? 'Main'}
-          </span>
+          <div class="anchor">
+            <button class="page" aria-haspopup="menu" aria-expanded={pagesOpen} disabled={pageList.length < 2} title={pageList.length < 2 ? undefined : 'Switch page'} onclick={(e) => { e.stopPropagation(); pagesOpen = !pagesOpen; }}>
+              {#if inFolder}<Folder size={13} />{:else}<LayoutGrid size={13} />{/if}
+              {page?.name ?? 'Main'}
+              {#if pageList.length > 1}<ChevronDown size={13} class="faint" />{/if}
+            </button>
+            {#if pagesOpen}
+              <div class="menu" style="left:0;top:30px" role="menu" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
+                {#each pageList as p (p.name)}
+                  <button class:current={p.name === page?.name} onclick={() => { pagesOpen = false; showPage(p.name); }}>
+                    {#if p.folder}<Folder size={14} />{:else}<LayoutGrid size={14} />{/if}{p.name}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
         </div>
         <div class="tools">
           {#if focused}
@@ -58,6 +87,7 @@
   {/if}
 
   <Dialog />
+  <GameDialog />
   {#if hub.toast}<div class="toast">{hub.toast}</div>{/if}
 </div>
 
@@ -85,11 +115,33 @@
     align-items: center;
     gap: 6px;
   }
+  .anchor {
+    position: relative;
+  }
   .page {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    height: 28px;
+    padding: 0 8px;
+    margin-left: -4px;
+    font: inherit;
     font-weight: 500;
+    color: var(--text);
+    background: none;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+  }
+  .page:hover:not(:disabled) {
+    background: var(--bg-hover);
+  }
+  .page:disabled {
+    cursor: default;
+  }
+  .menu .current {
+    color: var(--text);
+    background: var(--bg-active);
   }
   .tools {
     display: flex;

@@ -87,7 +87,7 @@ jobs:
 
       - name: Build
         run: |
-          cargo build --release --locked -p masterhubd
+          cargo build --release --locked -p masterhubd -p masterhub-games
           # `tauri build` (not plain cargo) so the UI is embedded instead of loaded from the dev server.
           (cd app && npx tauri build --no-bundle -- --locked)
 

@@ -6,9 +6,14 @@ post_install() {
     Then open "OpenMasterHUB" from your launcher to configure the hub.
     If the keypad or dial keep showing the Cooler Master animation,
     unplug and replug the MasterHUB once.
+
+    Optional game modes (Cyberpunk 2077, Deadlock, WoW Forever, Crimson Desert) are off.
+    Turn one on in the app: sidebar -> Game modes. It shows what will be installed
+    into the game and extracted from it, and does nothing until you approve.
 EOF
 }
 
 post_upgrade() {
   echo "==> Restart the service to use the new version: systemctl --user restart masterhubd"
+  echo "    (and masterhub-games, if you use game modes)"
 }

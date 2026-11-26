@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: PULPIT
+## Notes: Tells the PULPIT desk hub what is on your bars and binds free keys for its bar keys. Writes only its own saved variables.
+## Author: KREATURA
+## Version: 1.0
+## SavedVariables: PulpitDB
+
+PULPIT.lua
