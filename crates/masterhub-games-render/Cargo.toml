@@ -1,0 +1,18 @@
+[package]
+name = "pulpit-render"
+description = "PULPIT faces for MasterHUB keys and the dial (docs/STYLE.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+anyhow = "1"
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd"] }
+ab_glyph = "0.2"
+ttf-parser = { version = "0.25", default-features = false, features = ["std", "opentype-layout"] }
+svgtypes = "0.15"
+
+[dev-dependencies]
+# Animated GIFs for the press gallery example.
+image = { version = "0.25", default-features = false, features = ["png", "gif"] }
