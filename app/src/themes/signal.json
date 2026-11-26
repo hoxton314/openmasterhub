@@ -1,0 +1,81 @@
+{
+  "$schema": "./theme.schema.json",
+  "schemaVersion": 1,
+  "id": "signal",
+  "name": "Signal",
+  "author": "OpenMasterHUB",
+  "version": "1.0.0",
+  "description": "Five colours, square corners, Archivo caps headings.",
+  "appearance": "dark",
+  "followsSystem": false,
+  "density": "comfortable",
+  "inherits": "dark",
+  "tokens": {
+    "color": {
+      "bg": "#1F2A8A",
+      "surface": "#25319C",
+      "raised": "#000000",
+      "sunken": "#18216E",
+      "border": "rgba(255,255,255,0.30)",
+      "border2": "#FFFFFF",
+      "text1": "#FFFFFF",
+      "text2": "rgba(255,255,255,0.86)",
+      "text3": "rgba(255,255,255,0.72)",
+      "accent": "#FF6A00",
+      "accentFill": "#FF6A00",
+      "onAccent": "#000000",
+      "focus": "#FF6A00",
+      "success": "#FFFFFF",
+      "warning": "#FF6A00",
+      "danger": "#FF6A00",
+      "onDanger": "#000000",
+      "selection": "rgba(255,106,0,0.20)",
+      "accentSoft": "rgba(255,106,0,0.30)",
+      "canvas": "#000000",
+      "canvasDot": "#14183F",
+      "overlay": "rgba(0,0,0,0.72)",
+      "claim": "#F2D24B",
+      "chip": "rgba(255,255,255,0.12)",
+      "rail": "{color.sunken}",
+      "dialog": "{color.bg}"
+    },
+    "font": {
+      "heading": "Archivo, 'Inter Variable', Inter, sans-serif"
+    },
+    "type": {
+      "display": { "size": 36, "weight": 900, "case": "uppercase" },
+      "title": { "size": 28, "weight": 800, "case": "uppercase" },
+      "heading": { "size": 20, "weight": 800, "case": "uppercase", "tracking": 0.02 },
+      "section": { "size": 16, "weight": 700 },
+      "body": { "size": 14 },
+      "small": { "size": 13 },
+      "label": { "family": "heading", "size": 12, "lineHeight": 1.25, "weight": 800, "tracking": 0.08, "color": "text1" },
+      "tree": { "size": 13.5 }
+    },
+    "radius": {
+      "xs": 0, "sm": 0, "md": 0, "lg": 0, "xl": 0, "pill": 0,
+      "control": 0, "segment": 0, "kbd": 0, "row": 0, "sidebarRow": 0, "chip": 0, "avatar": 0,
+      "rail": 0, "card": 0, "panel": 0, "toast": 0, "popover": 0, "dialog": 0, "well": 0
+    },
+    "shadow": {
+      "popover": "0 0 0 2px #FFFFFF, 12px 12px 0 rgba(0,0,0,0.55)",
+      "segment": "none"
+    },
+    "focus": { "width": 3 },
+    "size": { "control": 36, "controlSm": 32, "rowSidebar": 34, "chip": 24, "dialogBorder": 3 },
+    "style": {
+      "headingCase": "uppercase",
+      "selectedRow": "invert",
+      "panelBorderWidth": 2,
+      "buttonWeight": 700,
+      "secondaryButton": "outline",
+      "dangerButton": "fill",
+      "segmentSelected": "fill",
+      "toggleOff": "outline",
+      "kbd": "inverse",
+      "statusChip": "outline",
+      "activeItem": "fill",
+      "fieldBorder": "strong"
+    }
+  }
+}
