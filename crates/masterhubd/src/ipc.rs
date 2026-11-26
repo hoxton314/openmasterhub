@@ -5,6 +5,7 @@
 //! are written to every client through the [`Broadcaster`].
 
 use std::io::{BufRead, BufReader};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -13,7 +14,9 @@ use anyhow::{Context, Result, bail};
 use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::{ListenerOptions, SendHalf, Stream};
 use masterhub_core::config::Config;
-use masterhub_core::ipc::{DisplayImage, Event, Request, RequestMsg, Response, ServerMsg, socket_name, write_line};
+use masterhub_core::ipc::{
+    DisplayImage, Event, Request, RequestMsg, Response, ServerMsg, TARGET_DIAL, socket_name, write_line,
+};
 use serde::Serialize;
 
 use crate::controller::{Msg, Snapshot};
@@ -86,10 +89,12 @@ fn client(stream: Stream, controller: Sender<Msg>, snapshot: Arc<Mutex<Snapshot>
     let send = Arc::new(Mutex::new(send));
     broadcaster.add(send.clone());
     log::debug!("app connected");
+    // Live-surface claims made on this connection; they end with it.
+    let mut claims: Vec<u64> = Vec::new();
     for line in BufReader::new(recv).lines() {
         let Ok(line) = line else { break };
         let response = match serde_json::from_str::<RequestMsg>(&line) {
-            Ok(RequestMsg { id, request }) => match handle(request, &controller, &snapshot) {
+            Ok(RequestMsg { id, request }) => match handle(request, &controller, &snapshot, &mut claims) {
                 Ok(result) => Response { id, result: Some(result), error: None },
                 Err(e) => Response { id, result: None, error: Some(format!("{e:#}")) },
             },
@@ -99,14 +104,28 @@ fn client(stream: Stream, controller: Sender<Msg>, snapshot: Arc<Mutex<Snapshot>
             break;
         }
     }
+    for claim in claims {
+        let _ = controller.send(Msg::Release { claim });
+    }
     log::debug!("app disconnected");
 }
+
+/// Live-surface claim ids, unique for the service's lifetime.
+static NEXT_CLAIM: AtomicU64 = AtomicU64::new(1);
+/// Largest frame accepted (a 240×240 JPEG at high quality is ~30 KB).
+const MAX_FRAME: usize = 256 * 1024;
 
 fn json<T: Serialize>(v: T) -> Result<serde_json::Value> {
     Ok(serde_json::to_value(v)?)
 }
 
-fn handle(request: Request, controller: &Sender<Msg>, snapshot: &Mutex<Snapshot>) -> Result<serde_json::Value> {
+fn handle(
+    request: Request,
+    controller: &Sender<Msg>,
+    snapshot: &Mutex<Snapshot>,
+    claims: &mut Vec<u64>,
+) -> Result<serde_json::Value> {
+    let own = |claim: u64| if claims.contains(&claim) { Ok(()) } else { Err(anyhow::anyhow!("no claim {claim} on this connection")) };
     match request {
         Request::GetConfig => json(&snapshot.lock().unwrap().config_text),
         Request::GetConfigPath => json(snapshot.lock().unwrap().config_path.display().to_string()),
@@ -146,11 +165,65 @@ fn handle(request: Request, controller: &Sender<Msg>, snapshot: &Mutex<Snapshot>
             controller.send(Msg::ShowPage(name))?;
             json(())
         }
-        Request::SetStatus { source, status, pid, background } => {
-            controller.send(Msg::SetStatus { source, status, pid, background })?;
+        Request::SetStatus { source, status, pid, background, detail } => {
+            controller.send(Msg::SetStatus { source, status, pid, background, detail })?;
             json(())
         }
         Request::GetOpenApps => json(crate::focus::open_apps()?),
         Request::GetAudio => json(crate::audio::info()),
+        Request::GetSessions => json(&snapshot.lock().unwrap().sessions),
+        Request::Claim { name, controls, apps, priority } => {
+            if controls.is_empty() {
+                bail!("claim names no controls");
+            }
+            if controls.keys.iter().any(|&k| k >= 15)
+                || controls.knobs.iter().any(|&k| k >= 3)
+                || controls.rollers.iter().any(|&k| k >= 2)
+                || controls.faders.iter().any(|&k| k >= 5)
+            {
+                bail!("claim names a control that does not exist");
+            }
+            let claim = NEXT_CLAIM.fetch_add(1, Ordering::Relaxed);
+            claims.push(claim);
+            controller.send(Msg::Claim { claim, name, controls, apps, priority })?;
+            json(serde_json::json!({ "claim": claim }))
+        }
+        Request::RunAction { action, value } => {
+            controller.send(Msg::RunAction { action, value })?;
+            json(())
+        }
+        Request::Backlight { claim, level } => {
+            own(claim)?;
+            controller.send(Msg::Backlight { claim, level })?;
+            json(())
+        }
+        Request::Release { claim } => {
+            own(claim)?;
+            claims.retain(|c| *c != claim);
+            controller.send(Msg::Release { claim })?;
+            json(())
+        }
+        Request::Frame { claim, target, jpeg } => {
+            own(claim)?;
+            if target >= 15 && target != TARGET_DIAL {
+                bail!("no display target {target}");
+            }
+            use base64::Engine;
+            let jpeg = base64::engine::general_purpose::STANDARD.decode(jpeg).context("jpeg is not base64")?;
+            if jpeg.len() > MAX_FRAME || !jpeg.starts_with(&[0xFF, 0xD8]) {
+                bail!("frame must be a JPEG of at most {MAX_FRAME} bytes");
+            }
+            controller.send(Msg::Frame { claim, target, jpeg: Arc::new(jpeg) })?;
+            json(())
+        }
+        Request::Led { claim, zone, mode, color, brightness } => {
+            own(claim)?;
+            let mode = match mode.as_deref() {
+                Some(m) => Some(crate::surface::parse_led_mode(m).ok_or_else(|| anyhow::anyhow!("unknown LED mode {m:?}"))?),
+                None => None,
+            };
+            controller.send(Msg::Led { claim, zone, mode, color: color.map(|c| c.0), brightness })?;
+            json(())
+        }
     }
 }

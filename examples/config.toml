@@ -6,7 +6,8 @@
 #   { cmd = "shell command" }       run with sh -c, or cmd /C on Windows
 #                                   ({value} = fader position 0..100)
 #   { keys = "ctrl+shift+m" }       virtual keyboard; names from linux/input-event-codes.h
-#                                   without KEY_ (playpause, volumeup, f13, ...)
+#                                   without KEY_ (playpause, volumeup, f13, ...);
+#                                   "o@700" holds the keys 700 ms (at most 3000)
 #   { volume = "+2" }               default output volume: "+2"/"-2" change it, "40" sets
 #                                   it, "{value}" follows a fader
 #   { mute = "toggle" }             mute the default output: toggle, on, off
@@ -15,6 +16,7 @@
 #                                   volume or mute of something else, one of:
 #                                   output = "default" | "<device>"   input = "default" | "<device>"
 #                                   app = "<program>"   group = "<audio group>"
+#                                   app = "focused": the app of the focused window
 #                                   (devices by name or description, apps by program or app
 #                                   name, .exe optional; case-insensitive, * wildcards)
 #   { page = "next" | "prev" | "<page name>" }

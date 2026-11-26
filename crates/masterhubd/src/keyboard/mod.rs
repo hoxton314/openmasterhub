@@ -24,19 +24,38 @@ impl Keyboard {
         Self { device: None }
     }
 
-    /// Press the keys of `combo` in order, then release them in reverse.
+    /// Press the keys of `combo` in order, then release them in reverse. `combo@ms` holds
+    /// them that long first (games that act on a held key, e.g. `"o@700"`).
     pub fn send(&mut self, combo: &str) -> Result<()> {
-        let keys = parse(combo)?;
+        let (keys, hold) = parse_hold(combo)?;
         if self.device.is_none() {
             self.device = Some(imp::Device::new()?);
         }
-        self.device.as_mut().expect("just created").tap(&keys)
+        self.device.as_mut().expect("just created").tap(&keys, hold)
     }
 }
 
 /// Check a combination without sending it (config validation).
 pub fn validate(combo: &str) -> Result<()> {
-    parse(combo).map(|_| ())
+    parse_hold(combo).map(|_| ())
+}
+
+/// The longest hold accepted: the actions thread waits it out.
+const MAX_HOLD_MS: u64 = 3000;
+
+/// `combo` or `combo@ms`.
+fn parse_hold(combo: &str) -> Result<(Vec<imp::Key>, std::time::Duration)> {
+    let (keys, ms) = match combo.rsplit_once('@') {
+        Some((k, ms)) => {
+            let ms: u64 = ms.trim().parse().map_err(|_| anyhow::anyhow!("bad hold time in {combo:?}"))?;
+            if ms > MAX_HOLD_MS {
+                bail!("hold of {ms} ms in {combo:?} is over {MAX_HOLD_MS} ms");
+            }
+            (k, ms)
+        }
+        None => (combo, 0),
+    };
+    Ok((parse(keys)?, std::time::Duration::from_millis(ms)))
 }
 
 fn parse(combo: &str) -> Result<Vec<imp::Key>> {
@@ -75,6 +94,14 @@ fn canonical(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn holds() {
+        assert!(validate("o@700").is_ok());
+        assert!(validate("ctrl+shift+m").is_ok());
+        assert!(validate("o@x").is_err());
+        assert!(validate("o@99999").is_err());
+    }
 
     #[test]
     fn aliases() {

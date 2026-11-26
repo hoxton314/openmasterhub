@@ -11,7 +11,7 @@ pub mod desktop;
 use std::io::Read;
 use std::path::PathBuf;
 
-use masterhub_core::ipc::{Request, Status, call_once};
+use masterhub_core::ipc::{Request, SessionDetail, Status, call_once};
 use serde::Deserialize;
 
 #[derive(Debug, Default, Deserialize)]
@@ -25,6 +25,9 @@ struct HookInput {
     agent_id: Option<String>,
     /// Sent with `Stop`: the session's tasks still running in the background.
     background_tasks: Option<Vec<BackgroundTask>>,
+    tool_input: Option<serde_json::Value>,
+    transcript_path: Option<String>,
+    cwd: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -82,6 +85,60 @@ fn report_for(input: &HookInput) -> Option<Report> {
     Some(Report { status: Some(s), background: false })
 }
 
+/// What the main agent is doing after this event, for session keys; `None` for events that
+/// say nothing about it (subagents, unknown events).
+fn detail_for(input: &HookInput) -> Option<SessionDetail> {
+    if input.agent_id.is_some() {
+        return None;
+    }
+    let doing = match input.hook_event_name.as_str() {
+        "Stop" if input.agents_running() => Some("Waiting for agents".to_owned()),
+        "SessionStart" | "Stop" | "StopFailure" => None,
+        "UserPromptSubmit" | "PostToolUse" | "PostToolUseFailure" | "ElicitationResult" => Some("Thinking".to_owned()),
+        "PermissionRequest" => Some(format!("Asks to {}", input.tool_name.as_deref().unwrap_or("run a tool"))),
+        "Elicitation" => Some("Asks you".to_owned()),
+        "PreToolUse" => match input.tool_name.as_deref() {
+            Some("AskUserQuestion") => Some("Asks you".to_owned()),
+            Some("ExitPlanMode") => Some("Plan ready".to_owned()),
+            Some(tool) => Some(summarize(tool, input.tool_input.as_ref())),
+            None => None,
+        },
+        "Notification" => match input.notification_type.as_deref() {
+            Some("permission_prompt") => Some("Needs permission".to_owned()),
+            Some("elicitation_dialog") => Some("Asks you".to_owned()),
+            Some("idle_prompt") => None,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    Some(SessionDetail { doing, transcript: input.transcript_path.clone(), cwd: input.cwd.clone() })
+}
+
+/// "Edit render.rs", "Bash cargo test", "Grep fn main": the tool and a short target.
+fn summarize(tool: &str, input: Option<&serde_json::Value>) -> String {
+    let field = |k: &str| input.and_then(|i| i.get(k)).and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty());
+    let file = || {
+        field("file_path").or_else(|| field("notebook_path")).map(|p| p.rsplit(['/', '\\']).next().unwrap_or(p).to_owned())
+    };
+    // mcp__server__tool → tool
+    let name = tool.rsplit("__").next().unwrap_or(tool);
+    let target = match tool {
+        "Edit" | "MultiEdit" | "Write" | "Read" | "NotebookEdit" => file(),
+        "Bash" => field("description").or_else(|| field("command")).map(str::to_owned),
+        "Grep" | "Glob" => field("pattern").map(str::to_owned),
+        "WebFetch" => field("url").map(|u| u.split('/').nth(2).unwrap_or(u).to_owned()),
+        "WebSearch" => field("query").map(str::to_owned),
+        "Agent" | "Task" => field("description").map(str::to_owned),
+        "Skill" => field("skill").map(str::to_owned),
+        _ => None,
+    };
+    let s = match target {
+        Some(t) => format!("{name} {}", t.lines().next().unwrap_or_default()),
+        None => name.to_owned(),
+    };
+    if s.chars().count() > 48 { s.chars().take(47).collect::<String>() + "…" } else { s }
+}
+
 pub fn hook() {
     let mut text = String::new();
     if std::io::stdin().read_to_string(&mut text).is_err() {
@@ -89,8 +146,13 @@ pub fn hook() {
     }
     let Ok(input) = serde_json::from_str::<HookInput>(&text) else { return };
     let Some(Report { status, background }) = report_for(&input) else { return };
-    let request =
-        Request::SetStatus { source: format!("claude:{}", input.session_id), status, pid: claude_pid(), background };
+    let request = Request::SetStatus {
+        source: format!("claude:{}", input.session_id),
+        status,
+        pid: claude_pid(),
+        background,
+        detail: detail_for(&input),
+    };
     // The service may not be running; that's fine.
     let _ = call_once(request);
 }
@@ -294,6 +356,28 @@ fn open_link(link: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn details_say_what_the_main_agent_does() {
+        let ev = |json: &str| detail_for(&serde_json::from_str::<HookInput>(json).unwrap()).and_then(|d| d.doing);
+        assert_eq!(
+            ev(r#"{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/x/src/render.rs"}}"#),
+            Some("Edit render.rs".into())
+        );
+        assert_eq!(
+            ev(r#"{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cargo test --locked","description":"Run tests"}}"#),
+            Some("Bash Run tests".into())
+        );
+        assert_eq!(ev(r#"{"hook_event_name":"PreToolUse","tool_name":"mcp__blender__look"}"#), Some("look".into()));
+        assert_eq!(ev(r#"{"hook_event_name":"UserPromptSubmit"}"#), Some("Thinking".into()));
+        assert_eq!(ev(r#"{"hook_event_name":"Stop"}"#), None);
+        assert_eq!(ev(r#"{"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion"}"#), Some("Asks you".into()));
+        // Subagents don't change what the main agent shows.
+        let sub = r#"{"hook_event_name":"PreToolUse","tool_name":"Edit","agent_id":"a1"}"#;
+        assert!(detail_for(&serde_json::from_str::<HookInput>(sub).unwrap()).is_none());
+        let long = summarize("Bash", Some(&serde_json::json!({ "command": "x".repeat(80) })));
+        assert_eq!(long.chars().count(), 48);
+    }
+
     use super::*;
 
     #[test]

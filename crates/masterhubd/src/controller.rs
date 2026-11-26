@@ -10,8 +10,10 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use masterhub_core::config::{Action, Color, Config, Face, Leds, Page, SessionSort, Side, Widget};
-use masterhub_core::ipc::{DisplayImage, Event, GUI_APP_ID, HubState, InputMsg, ModuleState, Status, TARGET_DIAL};
+use masterhub_core::config::{Action, AudioTarget, Color, Config, Face, Leds, Page, SessionSort, Side, Widget};
+use masterhub_core::ipc::{
+    ClaimState, Controls, DisplayImage, Event, GUI_APP_ID, HubState, InputMsg, LedZone, ModuleState, Status, TARGET_DIAL,
+};
 use masterhub_core::layout;
 use masterhub_core::render::{DIAL_SIZE, KEY_SIZE, LiveData, Picture, Renderer, load_picture};
 use masterhub_proto::{
@@ -25,6 +27,7 @@ use crate::claude::desktop::View;
 use crate::ipc::Broadcaster;
 use crate::hid::ModuleInfo;
 use crate::stats::Stats;
+use crate::surface::{Claim, Claims, Control, LedState};
 use crate::worker::DeviceCmd;
 
 pub enum Msg {
@@ -32,13 +35,31 @@ pub enum Msg {
     Disconnected { serial: String },
     Input { serial: String, report: InputReport },
     ActiveApp(String),
+    /// The focused window's title; sent just before its `ActiveApp` (and when it changes).
+    /// Only the Hyprland backend sends it so far.
+    #[cfg_attr(windows, allow(dead_code))]
+    ActiveTitle(String),
     /// A validated config from the app (IPC) (already saved to disk) with its TOML text.
     ApplyConfig { config: Box<Config>, text: String },
     SetProfile(String),
     ShowPage(String),
     /// A tool's status for the Base LED; `None` forgets the source. `background`: from work in
     /// the background of the source (see [`reported_status`]).
-    SetStatus { source: String, status: Option<Status>, pid: Option<u32>, background: bool },
+    SetStatus {
+        source: String,
+        status: Option<Status>,
+        pid: Option<u32>,
+        background: bool,
+        detail: Option<masterhub_core::ipc::SessionDetail>,
+    },
+    /// Live surface (see [`crate::surface`]).
+    Claim { claim: u64, name: String, controls: Controls, apps: Vec<String>, priority: i32 },
+    Release { claim: u64 },
+    Backlight { claim: u64, level: Option<u8> },
+    /// An action from a client (`run_action`).
+    RunAction { action: Action, value: Option<u8> },
+    Frame { claim: u64, target: u8, jpeg: Arc<Vec<u8>> },
+    Led { claim: u64, zone: LedZone, mode: Option<LedMode>, color: Option<Rgb>, brightness: Option<u8> },
 }
 
 /// State shared with the IPC server.
@@ -50,6 +71,7 @@ pub struct Snapshot {
     pub modules: Vec<ModuleState>,
     pub state: HubState,
     pub displays: BTreeMap<(String, u8), Arc<Vec<u8>>>,
+    pub sessions: Vec<masterhub_core::ipc::SessionInfo>,
 }
 
 struct Module {
@@ -95,6 +117,8 @@ struct Reporter {
     remote: bool,
     /// When it last reported.
     reported: Instant,
+    /// What it is doing (Claude Code sessions), from its last hook event that said so.
+    detail: masterhub_core::ipc::SessionDetail,
 }
 
 pub struct Controller {
@@ -112,6 +136,7 @@ pub struct Controller {
     /// Last orientation reported by the Base's sensor, if any.
     sensor_horizontal: Option<bool>,
     active_app: Option<String>,
+    active_title: Option<String>,
     anims: HashMap<(String, u8), Anim>,
     stats: Stats,
     live: HashMap<Widget, LiveData>,
@@ -133,7 +158,17 @@ pub struct Controller {
     shown_status: Option<Status>,
     blink_on: bool,
     blink_due: Option<Instant>,
+    /// Live-surface claims and who owns which control.
+    claims: Claims,
+    /// Claimed frames change fast: their `display` events go out at most every
+    /// [`DISPLAY_EVERY`]; the newest is sent on the next tick.
+    display_sent: HashMap<(String, u8), Instant>,
+    display_pending: BTreeMap<(String, u8), Arc<Vec<u8>>>,
+    /// A client's backlight level and its claim; the config's level otherwise.
+    backlight: Option<(u64, u8)>,
 }
+
+const DISPLAY_EVERY: Duration = Duration::from_millis(100);
 
 const TICK: Duration = Duration::from_secs(1);
 /// How long a Claude Code session stays `working` while its process is idle and nothing reports:
@@ -177,6 +212,7 @@ impl Controller {
             folders: Vec::new(),
             sensor_horizontal: None,
             active_app: None,
+            active_title: None,
             anims: HashMap::new(),
             stats: Stats::new(),
             live: HashMap::new(),
@@ -191,6 +227,10 @@ impl Controller {
             shown_status: None,
             blink_on: true,
             blink_due: None,
+            claims: Claims::default(),
+            display_sent: HashMap::new(),
+            display_pending: BTreeMap::new(),
+            backlight: None,
         };
         c.publish_state();
         c
@@ -215,6 +255,7 @@ impl Controller {
                 self.prune_statuses();
                 self.sample_widgets();
                 self.refresh_all();
+                self.flush_displays();
             }
             self.advance_animations(now);
             self.advance_blink(now);
@@ -250,11 +291,19 @@ impl Controller {
                 }
             }
             Msg::Input { serial, report } => self.input(&serial, report),
+            Msg::ActiveTitle(title) => {
+                let changed = self.active_title.as_deref() != Some(&title);
+                self.active_title = Some(title);
+                if changed {
+                    self.reclaim();
+                }
+            }
             // The GUI's own window: GTK uses the app ID, Tauri the binary name (openmasterhub[.exe]).
             Msg::ActiveApp(class) if class == GUI_APP_ID || class.to_ascii_lowercase().starts_with("openmasterhub") => {}
             Msg::ActiveApp(class) => {
                 let target = self.config.profile_for_app(&class);
                 self.active_app = Some(class);
+                self.reclaim();
                 if target != self.profile {
                     log::info!("focused {:?}: profile {:?}", self.active_app, self.config.profiles[target].name);
                     self.switch_profile(target);
@@ -272,7 +321,7 @@ impl Controller {
                 }
             }
             Msg::ShowPage(name) => self.show_page(&name),
-            Msg::SetStatus { source, status, pid, background } => {
+            Msg::SetStatus { source, status, pid, background, detail } => {
                 log::debug!("status {source}: {status:?}{}", if background { " (background)" } else { "" });
                 match status {
                     Some(status) => {
@@ -281,6 +330,9 @@ impl Controller {
                         let status = reported_status(old.as_ref().map(|r| r.status), status, background);
                         let mut r = old.unwrap_or_else(|| Reporter::new(status, pid, None, &mut self.reports));
                         r.set(status, &mut self.reports);
+                        if let Some(d) = detail {
+                            r.detail = d;
+                        }
                         (r.pid, r.file, r.discovered, r.remote, r.reported) = (pid, file, false, false, Instant::now());
                         self.statuses.insert(source, r);
                     }
@@ -290,7 +342,168 @@ impl Controller {
                 }
                 self.update_status();
                 self.refresh_sessions();
+                self.publish_sessions();
             }
+            Msg::Claim { claim, name, controls, apps, priority } => {
+                log::info!("{name} claims {controls:?} (apps {apps:?}, priority {priority}) as #{claim}");
+                let controls = crate::surface::expand(&controls);
+                let c = Claim { name, controls, apps, priority, frames: HashMap::new(), leds: HashMap::new() };
+                self.claims.insert(claim, c);
+                self.reclaim();
+                self.publish_claim(claim);
+            }
+            Msg::Backlight { claim, level } => {
+                self.backlight = level.map(|l| (claim, l.min(100)));
+                self.send_backlight();
+            }
+            Msg::Release { claim } => {
+                if self.backlight.is_some_and(|(c, _)| c == claim) {
+                    self.backlight = None;
+                    self.send_backlight();
+                }
+                if self.claims.remove(claim) {
+                    log::info!("claim #{claim} released");
+                    self.reclaim();
+                }
+            }
+            Msg::RunAction { action, value } => self.run_action(action, value, None),
+            Msg::Frame { claim, target, jpeg } => {
+                let Some(c) = self.claims.get_mut(claim) else { return };
+                c.frames.insert(target, jpeg);
+                if self.claims.owner(Control::of_target(target)) == Some(claim) {
+                    let module = if target == TARGET_DIAL { ModuleKind::Dial } else { ModuleKind::Keypad };
+                    for serial in self.serials_of(module) {
+                        self.refresh_target(&serial, target);
+                    }
+                }
+            }
+            Msg::Led { claim, zone, mode, color, brightness } => {
+                let Some(c) = self.claims.get_mut(claim) else { return };
+                let st = c.leds.entry(zone).or_default();
+                st.mode = mode.or(st.mode);
+                st.color = color.or(st.color);
+                st.brightness = brightness.or(st.brightness);
+                if self.claims.owner(Control::Led(zone)) == Some(claim) {
+                    // Only this LED, only what changed: LED reports are slow (one per 4 ms).
+                    self.send_one_led(zone, mode, color, brightness);
+                }
+            }
+        }
+    }
+
+    // ───────────────────────────── live surface ─────────────────────────────
+
+    fn send_backlight(&self) {
+        let level = self.backlight.map_or(self.config.backlight, |(_, l)| l);
+        for m in self.modules.values().filter(|m| matches!(m.info.kind, ModuleKind::Keypad | ModuleKind::Dial)) {
+            let _ = m.tx.send(DeviceCmd::Backlight(level));
+        }
+    }
+
+    fn serials_of(&self, kind: ModuleKind) -> Vec<String> {
+        self.modules.values().filter(|m| m.info.kind == kind).map(|m| m.info.serial.clone()).collect()
+    }
+
+    /// Decide again who owns which control and redraw what changed hands.
+    fn reclaim(&mut self) {
+        let changes = self.claims.recompute(self.active_app.as_deref(), self.active_title.as_deref());
+        let mut zones = Vec::new();
+        for ctl in &changes.controls {
+            match *ctl {
+                Control::Key(k) => {
+                    for s in self.serials_of(ModuleKind::Keypad) {
+                        self.anims.remove(&(s.clone(), k));
+                        self.refresh_target(&s, k);
+                    }
+                }
+                Control::Dial => {
+                    for s in self.serials_of(ModuleKind::Dial) {
+                        self.anims.remove(&(s.clone(), TARGET_DIAL));
+                        self.refresh_target(&s, TARGET_DIAL);
+                    }
+                }
+                Control::Led(z) => zones.push(z),
+                // Inputs are routed as they come in.
+                Control::Knob(_) | Control::Roller(_) | Control::Fader(_) => {}
+            }
+        }
+        for z in zones {
+            self.send_zone_leds(z);
+        }
+        if changes.controls.iter().any(|c| matches!(c, Control::Key(_) | Control::Dial)) {
+            // A released key may show a widget again.
+            self.sample_widgets();
+        }
+        for claim in changes.claims {
+            self.publish_claim(claim);
+        }
+    }
+
+    fn publish_claim(&self, claim: u64) {
+        let Some(c) = self.claims.get(claim) else { return };
+        let turn = |kind| self.serials_of(kind).first().map_or(0, |s| self.turn_for(s));
+        self.events.send(Event::Claim(ClaimState {
+            claim,
+            name: c.name.clone(),
+            active: self.claims.is_active(claim),
+            owns: crate::surface::collect(&self.claims.owned_by(claim)),
+            key_turn: turn(ModuleKind::Keypad),
+            dial_turn: turn(ModuleKind::Dial),
+        }));
+    }
+
+    fn publish_claims(&self) {
+        for id in self.claims.ids() {
+            self.publish_claim(id);
+        }
+    }
+
+    /// The LED state a claim set for `zone`, if a claim owns it.
+    fn claimed_led(&self, zone: LedZone) -> Option<LedState> {
+        let owner = self.claims.owner(Control::Led(zone))?;
+        Some(self.claims.get(owner)?.leds.get(&zone).copied().unwrap_or_default())
+    }
+
+    /// Re-send the LEDs of the module that has `zone`.
+    fn send_zone_leds(&mut self, zone: LedZone) {
+        let kind = match zone {
+            LedZone::Base => ModuleKind::Base,
+            LedZone::Knob(_) => ModuleKind::Knob,
+            LedZone::Fader(_) => ModuleKind::Fader,
+        };
+        if zone == LedZone::Base {
+            self.apply_base_led();
+            return;
+        }
+        for s in self.serials_of(kind) {
+            self.send_leds(&s);
+        }
+    }
+
+    fn send_one_led(&self, zone: LedZone, mode: Option<LedMode>, color: Option<Rgb>, brightness: Option<u8>) {
+        let (kind, idx) = match zone {
+            LedZone::Base => (ModuleKind::Base, 0),
+            LedZone::Knob(i) => (ModuleKind::Knob, i),
+            LedZone::Fader(i) => (ModuleKind::Fader, i),
+        };
+        let t = LedTarget::Index(idx);
+        let mut reports = Vec::new();
+        reports.extend(mode.and_then(|m| led_mode(kind, t, m)));
+        reports.extend(color.and_then(|c| led_color(kind, t, c)));
+        reports.extend(brightness.and_then(|b| led_brightness(kind, t, b)));
+        if reports.is_empty() {
+            return;
+        }
+        for m in self.modules.values().filter(|m| m.info.kind == kind) {
+            let _ = m.tx.send(DeviceCmd::Output(reports.clone()));
+        }
+    }
+
+    /// Send the newest claimed frames the app has not seen yet.
+    fn flush_displays(&mut self) {
+        for ((serial, target), jpeg) in std::mem::take(&mut self.display_pending) {
+            self.display_sent.insert((serial.clone(), target), Instant::now());
+            self.events.send(Event::Display(DisplayImage::new(&serial, target, &jpeg)));
         }
     }
 
@@ -458,7 +671,7 @@ impl Controller {
         m.shown.clear();
         let kind = m.info.kind;
         if matches!(kind, ModuleKind::Keypad | ModuleKind::Dial) {
-            let _ = m.tx.send(DeviceCmd::Backlight(self.config.backlight));
+            let _ = m.tx.send(DeviceCmd::Backlight(self.backlight.map_or(self.config.backlight, |(_, l)| l)));
         }
         self.send_leds(serial);
         self.refresh_module(serial);
@@ -486,15 +699,30 @@ impl Controller {
             ModuleKind::Knob => leds.knob.clone(),
             _ => return,
         };
-        let Some(colors) = colors else { return };
         let brightness = leds.brightness.unwrap_or(100);
         let mut reports = Vec::new();
         for i in 0..kind.led_count() {
-            let Some(c) = colors.get(i as usize) else { continue };
             let t = LedTarget::Index(i);
+            let zone = match kind {
+                ModuleKind::Base => LedZone::Base,
+                ModuleKind::Knob => LedZone::Knob(i),
+                _ => LedZone::Fader(i),
+            };
+            if let Some(st) = self.claimed_led(zone) {
+                // Only what the claim set; a colour alone means a static colour.
+                let mode = st.mode.or(st.color.map(|_| LedMode::Static));
+                reports.extend(mode.and_then(|m| led_mode(kind, t, m)));
+                reports.extend(st.color.and_then(|c| led_color(kind, t, c)));
+                reports.extend(st.brightness.and_then(|b| led_brightness(kind, t, b)));
+                continue;
+            }
+            let Some(c) = colors.as_ref().and_then(|c| c.get(i as usize)) else { continue };
             reports.extend(led_mode(kind, t, LedMode::Static));
             reports.extend(led_color(kind, t, c.0));
             reports.extend(led_brightness(kind, t, brightness));
+        }
+        if reports.is_empty() {
+            return;
         }
         let _ = m.tx.send(DeviceCmd::Output(reports));
     }
@@ -528,8 +756,14 @@ impl Controller {
         }
         log::info!("base status: {top:?}");
         self.shown_status = top;
+        self.apply_base_led();
+    }
+
+    /// Show the Base light: a claim's, the status colour, the configured colour, or the
+    /// firmware's cycling.
+    fn apply_base_led(&self) {
         let Some(serial) = self.base_serial() else { return };
-        if top.is_none() && self.effective_leds().base.is_none() {
+        if self.shown_status.is_none() && self.effective_leds().base.is_none() && self.claimed_led(LedZone::Base).is_none() {
             // No Base colour configured: back to the firmware's colour cycling.
             if let Some(m) = self.modules.get(&serial) {
                 let reports = led_mode(ModuleKind::Base, LedTarget::Index(0), LedMode::Cycling).into_iter().collect();
@@ -545,6 +779,7 @@ impl Controller {
         self.blink_on = !self.blink_on;
         self.blink_due = Some((due + BLINK).max(now));
         if self.shown_status == Some(Status::Attention)
+            && self.claims.owner(Control::Led(LedZone::Base)).is_none()
             && let (Some(c), Some(m)) = (self.status_color(), self.base_serial().and_then(|s| self.modules.get(&s)))
         {
             let reports = led_color(ModuleKind::Base, LedTarget::Index(0), c.0).into_iter().collect();
@@ -616,6 +851,34 @@ impl Controller {
         }
         if changed {
             self.update_status();
+        }
+        // Names come from the session files and change at any time.
+        self.publish_sessions();
+    }
+
+    /// Tell clients about the open sessions when anything about them changed.
+    fn publish_sessions(&mut self) {
+        let list: Vec<masterhub_core::ipc::SessionInfo> = self
+            .sessions()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(slot, r)| {
+                let source = self.statuses.iter().find(|(_, x)| std::ptr::eq(*x, r)).map(|(s, _)| s.clone())?;
+                Some(masterhub_core::ipc::SessionInfo {
+                    slot: slot as u8,
+                    source,
+                    name: r.file.as_ref().and_then(SessionFile::title).unwrap_or_else(|| "Claude".to_owned()),
+                    status: r.status,
+                    since: r.changed_at,
+                    detail: r.detail.clone(),
+                })
+            })
+            .collect();
+        let mut snap = self.snapshot.lock().unwrap();
+        if snap.sessions != list {
+            snap.sessions = list.clone();
+            drop(snap);
+            self.events.send(Event::Sessions(list));
         }
     }
 
@@ -789,6 +1052,20 @@ impl Controller {
     /// Render one display target and send it if it changed.
     fn refresh_target(&mut self, serial: &str, target: u8) {
         let size = if target == TARGET_DIAL { DIAL_SIZE } else { KEY_SIZE };
+        if let Some(owner) = self.claims.owner(Control::of_target(target)) {
+            self.anims.remove(&(serial.to_owned(), target));
+            let frame = self.claims.get(owner).and_then(|c| c.frames.get(&target).cloned());
+            // Nothing pushed yet: blank, rather than the config's face under it.
+            let jpeg = match frame {
+                Some(f) => f,
+                None => match self.renderer.render(&Face::default(), size, None, None, 0) {
+                    Ok(j) => Arc::new(j),
+                    Err(e) => return log::error!("rendering: {e:#}"),
+                },
+            };
+            self.show(serial, target, jpeg, true);
+            return;
+        }
         let face = self.face_for(target).unwrap_or_default();
         let picture = face.image.as_ref().and_then(|p| self.picture(p, size));
         let frame = match picture.as_deref() {
@@ -811,6 +1088,12 @@ impl Controller {
                 return;
             }
         };
+        self.show(serial, target, jpeg, false);
+    }
+
+    /// Send an image to a display target if it changed. `throttle`: claimed frames, whose
+    /// `display` events are rate-limited (see [`Controller::flush_displays`]).
+    fn show(&mut self, serial: &str, target: u8, jpeg: Arc<Vec<u8>>, throttle: bool) {
         let Some(m) = self.modules.get_mut(serial) else { return };
         if m.shown.get(&target).is_some_and(|old| *old == jpeg) {
             return;
@@ -818,7 +1101,14 @@ impl Controller {
         m.shown.insert(target, jpeg.clone());
         let it = if target == TARGET_DIAL { ImageTarget::Dial } else { ImageTarget::Key(target) };
         let _ = m.tx.send(DeviceCmd::Image { target: it, jpeg: jpeg.clone() });
-        self.snapshot.lock().unwrap().displays.insert((serial.to_owned(), target), jpeg.clone());
+        let key = (serial.to_owned(), target);
+        self.snapshot.lock().unwrap().displays.insert(key.clone(), jpeg.clone());
+        if throttle && self.display_sent.get(&key).is_some_and(|t| t.elapsed() < DISPLAY_EVERY) {
+            self.display_pending.insert(key, jpeg);
+            return;
+        }
+        self.display_pending.remove(&key);
+        self.display_sent.insert(key, Instant::now());
         self.events.send(Event::Display(DisplayImage::new(serial, target, &jpeg)));
     }
 
@@ -883,6 +1173,9 @@ impl Controller {
                 _ => continue,
             };
             for t in targets {
+                if self.claims.owner(Control::of_target(t)).is_some() {
+                    continue;
+                }
                 if let Some(w) = self.face_for(t).and_then(|f| f.widget) {
                     needed.push(w);
                 }
@@ -938,6 +1231,7 @@ impl Controller {
                     self.publish_state();
                     // Turn the screens to the new orientation.
                     self.refresh_all();
+                    self.publish_claims();
                 }
             }
             InputReport::Unknown { .. } => {}
@@ -945,35 +1239,50 @@ impl Controller {
 
         for (control, index, event, value) in events {
             log::debug!("{control} {index} {event} {value:?}");
+            let claim = Control::of_input(control, index).and_then(|c| self.claims.owner(c));
             let msg = InputMsg {
                 serial: serial.to_owned(),
                 control: control.into(),
                 index,
                 event: event.into(),
                 value,
+                claim,
             };
             self.events.send(Event::Input(msg));
+            if claim.is_some() {
+                continue;
+            }
             if let Some(action) = self.binding(control, index, event) {
-                match &action {
-                    Action::Session(slot) => {
-                        self.bring_up(*slot);
-                        continue;
-                    }
-                    Action::Sessions(dir) => {
-                        self.scroll_sessions(dir);
-                        continue;
-                    }
-                    _ => {}
-                }
                 let coalesce = (control == "fader").then(|| format!("{serial}/fader{index}"));
-                if !self.navigate(&action) {
-                    let audio = match &action {
-                        Action::Volume(v) => crate::audio::Target::resolve(&v.target, &self.config.audio_groups),
-                        Action::Mute(m) => crate::audio::Target::resolve(&m.target, &self.config.audio_groups),
-                        _ => None,
-                    };
-                    let _ = self.actions.send(Request { action, value, coalesce, audio });
-                }
+                self.run_action(action, value, coalesce);
+            }
+        }
+    }
+
+    /// Resolve a volume or mute target; `app = "focused"` means the focused window's app.
+    fn audio_target(&self, target: &AudioTarget) -> Option<crate::audio::Target> {
+        match target {
+            AudioTarget::App(a) if a.eq_ignore_ascii_case("focused") => {
+                let class = self.active_app.clone().filter(|c| !c.is_empty())?;
+                crate::audio::Target::resolve(&AudioTarget::App(class), &[])
+            }
+            t => crate::audio::Target::resolve(t, &self.config.audio_groups),
+        }
+    }
+
+    /// Run an action from a control or a `run_action` request.
+    fn run_action(&mut self, action: Action, value: Option<u8>, coalesce: Option<String>) {
+        match &action {
+            Action::Session(slot) => self.bring_up(*slot),
+            Action::Sessions(dir) => self.scroll_sessions(dir),
+            _ if self.navigate(&action) => {}
+            _ => {
+                let audio = match &action {
+                    Action::Volume(v) => self.audio_target(&v.target),
+                    Action::Mute(m) => self.audio_target(&m.target),
+                    _ => None,
+                };
+                let _ = self.actions.send(Request { action, value, coalesce, audio });
             }
         }
     }
@@ -1076,6 +1385,7 @@ impl Controller {
         if moved {
             self.refresh_all();
         }
+        self.publish_claims();
     }
 }
 
@@ -1128,6 +1438,7 @@ impl Reporter {
             discovered: false,
             remote: false,
             reported: Instant::now(),
+            detail: Default::default(),
         };
         *seq += 1;
         r

@@ -102,27 +102,53 @@ impl Worker {
     }
 
     fn drain(&mut self, rx: &Receiver<DeviceCmd>) -> Result<()> {
+        // Only the newest image per target: a client pushing frames faster than the module
+        // takes them must not build up lag.
+        let mut cmds: Vec<DeviceCmd> = Vec::new();
         loop {
             match rx.try_recv() {
                 Ok(DeviceCmd::Image { target, jpeg }) => {
+                    cmds.retain(|c| !matches!(c, DeviceCmd::Image { target: t, .. } if *t == target));
+                    cmds.push(DeviceCmd::Image { target, jpeg });
+                }
+                // LED reports: a newer one for the same command and LED replaces the older,
+                // so a fast stream of LED changes can't back up behind the 4 ms pacing.
+                Ok(DeviceCmd::Output(reports)) => {
+                    for r in reports {
+                        let key = |x: &[u8]| (x.get(1).copied(), x.get(2).copied(), x.get(3).copied());
+                        for c in cmds.iter_mut() {
+                            if let DeviceCmd::Output(old) = c {
+                                old.retain(|o| key(o) != key(&r));
+                            }
+                        }
+                        cmds.push(DeviceCmd::Output(vec![r]));
+                    }
+                }
+                Ok(cmd) => cmds.push(cmd),
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+        for cmd in cmds {
+            match cmd {
+                DeviceCmd::Image { target, jpeg } => {
                     for pkt in image_packets(target, &jpeg) {
                         self.dev.write_output(&pkt)?;
                     }
                 }
-                Ok(DeviceCmd::Output(reports)) => {
+                DeviceCmd::Output(reports) => {
                     for r in reports {
                         self.dev.write_output(&r)?;
                         // The full-speed modules poll their OUT endpoint every 3 ms.
                         std::thread::sleep(Duration::from_millis(4));
                     }
                 }
-                Ok(DeviceCmd::Backlight(level)) => {
+                DeviceCmd::Backlight(level) => {
                     if let Some(cmd) = FeatureCommand::backlight(self.dev.info.kind, level) {
                         self.dev.command(&cmd)?;
                     }
                 }
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => return Ok(()),
             }
         }
+        Ok(())
     }
 }

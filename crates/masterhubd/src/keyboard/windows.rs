@@ -97,7 +97,7 @@ impl Device {
         Ok(Self)
     }
 
-    pub fn tap(&mut self, keys: &[Key]) -> Result<()> {
+    pub fn tap(&mut self, keys: &[Key], hold: std::time::Duration) -> Result<()> {
         let event = |key: &Key, up: bool| INPUT {
             r#type: INPUT_KEYBOARD,
             Anonymous: INPUT_0 {
@@ -110,13 +110,21 @@ impl Device {
                 },
             },
         };
-        let inputs: Vec<INPUT> =
-            keys.iter().map(|k| event(k, false)).chain(keys.iter().rev().map(|k| event(k, true))).collect();
-        // SAFETY: `inputs` is a valid array of INPUT structures of the given length and size.
-        let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
-        if sent as usize != inputs.len() {
-            bail!("SendInput sent {sent} of {} events (blocked by a higher-privileged window?)", inputs.len());
+        let send = |inputs: Vec<INPUT>| -> Result<()> {
+            // SAFETY: `inputs` is a valid array of INPUT structures of the given length and size.
+            let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) };
+            if sent as usize != inputs.len() {
+                bail!("SendInput sent {sent} of {} events (blocked by a higher-privileged window?)", inputs.len());
+            }
+            Ok(())
+        };
+        let down = keys.iter().map(|k| event(k, false));
+        let up = keys.iter().rev().map(|k| event(k, true));
+        if hold.is_zero() {
+            return send(down.chain(up).collect());
         }
-        Ok(())
+        send(down.collect())?;
+        std::thread::sleep(hold);
+        send(up.collect())
     }
 }

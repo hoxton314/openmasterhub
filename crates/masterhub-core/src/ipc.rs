@@ -15,11 +15,29 @@
 //! | `get_displays` | | `Vec<DisplayImage>` |
 //! | `set_profile` | `name` | switch profile (until the focused app changes) |
 //! | `show_page` | `name` | show a keypad page or folder of the active profile |
-//! | `set_status` | `source`, `status`, `pid`, `background` | set (or clear, `status: null`) a tool's [`Status`] |
+//! | `set_status` | `source`, `status`, `pid`, `background`, `detail` | set (or clear, `status: null`) a tool's [`Status`] |
 //! | `get_open_apps` | | window classes (`.exe` names on Windows) of open windows, sorted |
 //! | `get_audio` | | [`AudioInfo`]: apps playing audio, output and input devices |
+//! | `get_sessions` | | open Claude Code sessions, `Vec<SessionInfo>` (also the `sessions` event) |
+//! | `claim` | `name`, `controls`, `apps`, `priority` | take over controls (live surface), `{"claim": id}` |
+//! | `release` | `claim` | give them back |
+//! | `backlight` | `claim`, `level` (0..=100, null = the config's) | dim the key and dial screens while the claim lives |
+//! | `run_action` | `action` (as in the config, e.g. `{"keys":"ctrl+c"}`), `value`? | run it now |
+//! | `frame` | `claim`, `target`, `jpeg` (base64) | show an image on a claimed key (0..=14) or the dial (255) |
+//! | `led` | `claim`, `zone`, `mode`, `color`, `brightness` | set a claimed LED |
 //!
-//! Events: `input`, `state`, `modules`, `display`, `config_changed`.
+//! Events: `input`, `state`, `modules`, `display`, `config_changed`, `claim`, `sessions`.
+//!
+//! ## Live surface
+//!
+//! A client claims [`Controls`] while any of `apps` (window class globs, as for profiles) is
+//! focused, or always when `apps` is empty. Where claims overlap, the higher `priority` wins,
+//! then the newer claim. While a client owns a control the service stops drawing it, sends
+//! no action for it, and marks its `input` events with the claim id; the client draws keys
+//! and the dial with `frame` and sets LEDs with `led`. Frames are kept, so an owner that gets
+//! a control back (focus returns) shows its last frame again. A claim ends with `release` or
+//! when the client disconnects. `claim` events tell each client what it owns right now and
+//! how far to turn images clockwise so they read upright.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
@@ -77,6 +95,62 @@ pub struct InputMsg {
     pub event: String,
     /// Fader position 0..=100.
     pub value: Option<u8>,
+    /// The live-surface claim that owns this control, if any (it got no config action).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim: Option<u64>,
+}
+
+/// An LED zone a client can claim: the Base light, one knob ring, one fader light.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LedZone {
+    Base,
+    Knob(u8),
+    Fader(u8),
+}
+
+/// Controls taken over by a live-surface client (see the module docs).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Controls {
+    /// Keypad keys 0..=14.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<u8>,
+    /// The dial: its screen, turns and press.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dial: bool,
+    /// Knobs 0..=2: turns and press (their LEDs are `leds`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub knobs: Vec<u8>,
+    /// Rollers: 0 = left, 1 = right.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rollers: Vec<u8>,
+    /// Faders 0..=4.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub faders: Vec<u8>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub leds: Vec<LedZone>,
+}
+
+impl Controls {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// What a live-surface claim owns right now (event `claim`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimState {
+    pub claim: u64,
+    pub name: String,
+    /// One of its `apps` is focused (or it has none).
+    pub active: bool,
+    /// The claimed controls it owns now (none while inactive or outranked).
+    pub owns: Controls,
+    /// Turn key images this far clockwise (0/90/180/270) to read upright.
+    pub key_turn: u16,
+    /// Same for the dial.
+    pub dial_turn: u16,
 }
 
 /// A rendered display: JPEG as base64.
@@ -125,9 +199,47 @@ pub enum Request {
         /// a `working` report then turns `ready` into `working` but never hides `attention`.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         background: bool,
+        /// What the session is doing, from the main agent's hook events; replaces the last.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<SessionDetail>,
     },
     GetOpenApps,
     GetAudio,
+    /// The open Claude Code sessions, in slot order (`Vec<SessionInfo>`).
+    GetSessions,
+    /// Take over controls; the result is `{"claim": id}`. See the module docs.
+    Claim {
+        name: String,
+        controls: Controls,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        apps: Vec<String>,
+        #[serde(default)]
+        priority: i32,
+    },
+    Release { claim: u64 },
+    /// Key and dial screen backlight, 0..=100, or `None` for the config's level. Ends with
+    /// the claim, so a client that quits never leaves the screens dark.
+    Backlight { claim: u64, level: Option<u8> },
+    /// Run a config action now, as if a control bound to it fired (`value`: a fader position).
+    RunAction {
+        action: crate::config::Action,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<u8>,
+    },
+    /// A 72×72 (key) or 240×240 (dial) JPEG, base64, for a claimed key or the dial (255).
+    Frame { claim: u64, target: u8, jpeg: String },
+    /// Set a claimed LED. Fields left out keep their value.
+    Led {
+        claim: u64,
+        zone: LedZone,
+        /// off, static, breathing, strobe, spring, cycling, random, wave, water, rainbow
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        color: Option<crate::config::Color>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        brightness: Option<u8>,
+    },
 }
 
 /// Suggestions for the targets of volume and mute actions.
@@ -156,6 +268,37 @@ pub enum Event {
     Modules(Vec<ModuleState>),
     Display(DisplayImage),
     ConfigChanged,
+    Claim(ClaimState),
+    /// The open Claude Code sessions changed (see `get_sessions`).
+    Sessions(Vec<SessionInfo>),
+}
+
+/// What a Claude Code session is doing, beyond its status (from its hooks).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SessionDetail {
+    /// e.g. "Edit render.rs", "Bash cargo test", "Thinking"; none while waiting for a prompt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doing: Option<String>,
+    /// The session's transcript (JSONL), for its last words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+}
+
+/// One open Claude Code session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionInfo {
+    /// Its slot: 0 = the oldest open session (the `session` action and widget use it).
+    pub slot: u8,
+    pub source: String,
+    pub name: String,
+    pub status: Status,
+    /// When the status last changed, Unix milliseconds.
+    pub since: u64,
+    #[serde(flatten)]
+    pub detail: SessionDetail,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -342,6 +485,16 @@ impl Client {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn run_action_takes_config_actions() {
+        let r: RequestMsg = serde_json::from_str(r#"{"id":3,"method":"run_action","params":{"action":{"volume":{"level":"+2","app":"discord"}}}}"#).unwrap();
+        let Request::RunAction { action, value } = r.request else { panic!("not run_action") };
+        assert_eq!(value, None);
+        assert!(matches!(action, crate::config::Action::Volume(v) if v.target == crate::config::AudioTarget::App("discord".into())));
+        let r: RequestMsg = serde_json::from_str(r#"{"id":4,"method":"run_action","params":{"action":{"keys":"ctrl+c"}}}"#).unwrap();
+        assert!(matches!(r.request, Request::RunAction { action: crate::config::Action::Keys(_), .. }));
+    }
+
     use super::*;
 
     #[test]
@@ -356,7 +509,13 @@ mod tests {
 
         let r = RequestMsg {
             id: 2,
-            request: Request::SetStatus { source: "claude:x".into(), status: Some(Status::Attention), pid: None, background: false },
+            request: Request::SetStatus {
+                source: "claude:x".into(),
+                status: Some(Status::Attention),
+                pid: None,
+                background: false,
+                detail: None,
+            },
         };
         assert_eq!(
             serde_json::to_string(&r).unwrap(),

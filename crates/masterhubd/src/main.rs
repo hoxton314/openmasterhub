@@ -13,6 +13,7 @@ mod ipc;
 mod keyboard;
 mod resume;
 mod stats;
+mod surface;
 mod worker;
 
 use std::collections::HashMap;

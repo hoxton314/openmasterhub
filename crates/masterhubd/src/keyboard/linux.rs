@@ -30,9 +30,12 @@ impl Device {
         Ok(Self(dev))
     }
 
-    pub fn tap(&mut self, keys: &[Key]) -> Result<()> {
+    pub fn tap(&mut self, keys: &[Key], hold: Duration) -> Result<()> {
         for k in keys {
             self.0.emit(&[*KeyEvent::new(*k, 1)])?;
+        }
+        if !hold.is_zero() {
+            thread::sleep(hold);
         }
         for k in keys.iter().rev() {
             self.0.emit(&[*KeyEvent::new(*k, 0)])?;
