@@ -10,7 +10,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use masterhub_core::config::{Action, Color, Config, Face, Leds, Page, SessionSort, Side, Widget};
+use masterhub_core::config::{Action, AudioTarget, Color, Config, Face, Leds, Page, SessionSort, Side, Widget};
 use masterhub_core::ipc::{
     ClaimState, Controls, DisplayImage, Event, GUI_APP_ID, HubState, InputMsg, LedZone, ModuleState, Status, TARGET_DIAL,
 };
@@ -36,6 +36,8 @@ pub enum Msg {
     Input { serial: String, report: InputReport },
     ActiveApp(String),
     /// The focused window's title; sent just before its `ActiveApp` (and when it changes).
+    /// Only the Hyprland backend sends it so far.
+    #[cfg_attr(windows, allow(dead_code))]
     ActiveTitle(String),
     /// A validated config from the app (IPC) (already saved to disk) with its TOML text.
     ApplyConfig { config: Box<Config>, text: String },
@@ -289,7 +291,6 @@ impl Controller {
                 }
             }
             Msg::Input { serial, report } => self.input(&serial, report),
-            // The GUI's own window: GTK uses the app ID, Tauri the binary name (openmasterhub[.exe]).
             Msg::ActiveTitle(title) => {
                 let changed = self.active_title.as_deref() != Some(&title);
                 self.active_title = Some(title);
@@ -297,6 +298,7 @@ impl Controller {
                     self.reclaim();
                 }
             }
+            // The GUI's own window: GTK uses the app ID, Tauri the binary name (openmasterhub[.exe]).
             Msg::ActiveApp(class) if class == GUI_APP_ID || class.to_ascii_lowercase().starts_with("openmasterhub") => {}
             Msg::ActiveApp(class) => {
                 let target = self.config.profile_for_app(&class);
@@ -1257,6 +1259,17 @@ impl Controller {
         }
     }
 
+    /// Resolve a volume or mute target; `app = "focused"` means the focused window's app.
+    fn audio_target(&self, target: &AudioTarget) -> Option<crate::audio::Target> {
+        match target {
+            AudioTarget::App(a) if a.eq_ignore_ascii_case("focused") => {
+                let class = self.active_app.clone().filter(|c| !c.is_empty())?;
+                crate::audio::Target::resolve(&AudioTarget::App(class), &[])
+            }
+            t => crate::audio::Target::resolve(t, &self.config.audio_groups),
+        }
+    }
+
     /// Run an action from a control or a `run_action` request.
     fn run_action(&mut self, action: Action, value: Option<u8>, coalesce: Option<String>) {
         match &action {
@@ -1265,8 +1278,8 @@ impl Controller {
             _ if self.navigate(&action) => {}
             _ => {
                 let audio = match &action {
-                    Action::Volume(v) => crate::audio::Target::resolve(&v.target, &self.config.audio_groups),
-                    Action::Mute(m) => crate::audio::Target::resolve(&m.target, &self.config.audio_groups),
+                    Action::Volume(v) => self.audio_target(&v.target),
+                    Action::Mute(m) => self.audio_target(&m.target),
                     _ => None,
                 };
                 let _ = self.actions.send(Request { action, value, coalesce, audio });

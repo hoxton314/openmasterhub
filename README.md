@@ -103,6 +103,13 @@ background in the colour of its status; press it to jump to that session. Sessio
 sorted with the ones waiting for you first, and the left roller pages through more sessions
 than keys. Setup: [`docs/CLAUDE_CODE.md`](docs/CLAUDE_CODE.md).
 
+### Live surface for other programs
+
+Other programs can take over keys, the dial, knobs, rollers, faders and LEDs through the
+service's local socket: they draw their own key and dial images, get the inputs, dim the
+screens and run config actions, while the config keeps working under them. Claims can follow
+the focused app. Protocol: [`docs/LIVE_SURFACE.md`](docs/LIVE_SURFACE.md).
+
 ## Install
 
 | Platform | Package |

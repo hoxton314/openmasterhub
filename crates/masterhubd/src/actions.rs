@@ -51,7 +51,7 @@ fn run(rx: Receiver<Request>) {
                         }
                     }
                     (None, _) => log::error!("volume {v:?}: invalid"),
-                    (_, None) => log::error!("volume {v:?}: unknown audio group"),
+                    (_, None) => log::error!("volume {v:?}: unknown audio group, or no focused app"),
                 },
                 Action::Mute(m) => match &req.audio {
                     Some(target) => {
@@ -59,7 +59,7 @@ fn run(rx: Receiver<Request>) {
                             log::error!("mute {m:?}: {e:#}");
                         }
                     }
-                    None => log::error!("mute {m:?}: unknown audio group"),
+                    None => log::error!("mute {m:?}: unknown audio group, or no focused app"),
                 },
                 // Navigation and sessions are handled by the controller and never reach this thread.
                 Action::Page(_) | Action::Folder(_) | Action::Back(_) | Action::Profile(_) | Action::Session(_) | Action::Sessions(_) => {}

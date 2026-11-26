@@ -22,7 +22,9 @@ config keeps working under it; when the claim ends, the config's faces and actio
   - `faders` 0..=4;
   - `leds`: `"base"`, `{"knob":i}` or `{"fader":i}`.
 - **When it applies:** `apps` is a list of window-class globs, as for profiles. The claim
-  applies only while one of them is focused, or always when the list is empty.
+  applies only while one of them is focused, or always when the list is empty. A pattern
+  `class@title` (both globs) also matches the window title, for apps that share a class
+  (games started through one launcher); titles come from the Hyprland backend only so far.
 - **Overlaps:** the higher `priority` wins, then the newer claim. A claim that gets its
   controls back shows its last frames again.
 - **While owned:** the service doesn't draw the control or run its configured action. Its
