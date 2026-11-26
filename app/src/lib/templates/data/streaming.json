@@ -1,0 +1,204 @@
+{
+  "id": "streaming",
+  "kind": "profile",
+  "name": "Streaming / OBS",
+  "about": "Scenes, mic, clips and markers; knobs for stream audio",
+  "category": "Streaming",
+  "needs": [
+    "keypad",
+    "dial",
+    "knob"
+  ],
+  "profile": {
+    "name": "Streaming",
+    "apps": [
+      "obs",
+      "com.obsproject.Studio",
+      "obs64.exe"
+    ],
+    "color": "#7B4FD0",
+    "about": "Scenes, mic, clips and markers; knobs for stream audio",
+    "leds": {
+      "base": "#8000ff"
+    },
+    "page": [
+      {
+        "name": "Scenes",
+        "key": [
+          {
+            "index": 0,
+            "label": "On air",
+            "press": {
+              "keys": "ctrl+alt+f9"
+            },
+            "background": "#8a1f1f",
+            "text_color": "#ffd0d0"
+          },
+          {
+            "index": 1,
+            "label": "Cam",
+            "press": {
+              "keys": "ctrl+alt+f5"
+            }
+          },
+          {
+            "index": 2,
+            "label": "Game",
+            "press": {
+              "keys": "ctrl+alt+f6"
+            }
+          },
+          {
+            "index": 3,
+            "label": "Chat",
+            "press": {
+              "keys": "ctrl+alt+f7"
+            }
+          },
+          {
+            "index": 4,
+            "label": "Mic",
+            "press": {
+              "keys": "ctrl+alt+f8"
+            },
+            "background": "#173430",
+            "text_color": "#7fe3c6"
+          },
+          {
+            "index": 5,
+            "label": "Starting",
+            "press": {
+              "keys": "ctrl+alt+f1"
+            },
+            "background": "#6a1b9a"
+          },
+          {
+            "index": 6,
+            "label": "Live",
+            "press": {
+              "keys": "ctrl+alt+f2"
+            },
+            "background": "#6a1b9a"
+          },
+          {
+            "index": 7,
+            "label": "BRB",
+            "press": {
+              "keys": "ctrl+alt+f3"
+            },
+            "background": "#6a1b9a"
+          },
+          {
+            "index": 8,
+            "label": "Ending",
+            "press": {
+              "keys": "ctrl+alt+f4"
+            },
+            "background": "#6a1b9a"
+          },
+          {
+            "index": 10,
+            "label": "Clip",
+            "press": {
+              "keys": "ctrl+alt+f10"
+            }
+          },
+          {
+            "index": 11,
+            "label": "Marker",
+            "press": {
+              "keys": "ctrl+alt+f11"
+            }
+          },
+          {
+            "index": 12,
+            "label": "Lo-fi",
+            "press": {
+              "keys": "ctrl+alt+f12"
+            }
+          },
+          {
+            "index": 13,
+            "widget": {
+              "kind": "clock"
+            }
+          },
+          {
+            "index": 14,
+            "widget": {
+              "kind": "cpu_usage"
+            }
+          }
+        ]
+      }
+    ],
+    "dial": {
+      "label": "Output",
+      "cw": {
+        "volume": "+2"
+      },
+      "ccw": {
+        "volume": "-2"
+      },
+      "press": {
+        "mute": "toggle"
+      }
+    },
+    "knob": [
+      {
+        "index": 0,
+        "cw": {
+          "volume": {
+            "level": "+2",
+            "app": "Discord"
+          }
+        },
+        "ccw": {
+          "volume": {
+            "level": "-2",
+            "app": "Discord"
+          }
+        },
+        "press": {
+          "mute": {
+            "state": "toggle",
+            "app": "Discord"
+          }
+        }
+      },
+      {
+        "index": 1,
+        "cw": {
+          "volume": {
+            "level": "+2",
+            "app": "Spotify"
+          }
+        },
+        "ccw": {
+          "volume": {
+            "level": "-2",
+            "app": "Spotify"
+          }
+        },
+        "press": {
+          "mute": {
+            "state": "toggle",
+            "app": "Spotify"
+          }
+        }
+      },
+      {
+        "index": 2,
+        "cw": {
+          "volume": "+2"
+        },
+        "ccw": {
+          "volume": "-2"
+        },
+        "press": {
+          "mute": "toggle"
+        }
+      }
+    ]
+  }
+}

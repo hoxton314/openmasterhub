@@ -1,0 +1,56 @@
+{
+  "id": "control-mixer",
+  "kind": "control",
+  "name": "5-app mixer",
+  "about": "Five faders, one app each",
+  "category": "Audio",
+  "needs": [
+    "fader"
+  ],
+  "controls": {
+    "fader": [
+      {
+        "index": 0,
+        "change": {
+          "volume": {
+            "level": "{value}",
+            "app": "Discord"
+          }
+        }
+      },
+      {
+        "index": 1,
+        "change": {
+          "volume": {
+            "level": "{value}",
+            "app": "Spotify"
+          }
+        }
+      },
+      {
+        "index": 2,
+        "change": {
+          "volume": {
+            "level": "{value}",
+            "app": "firefox"
+          }
+        }
+      },
+      {
+        "index": 3,
+        "change": {
+          "volume": {
+            "level": "{value}",
+            "app": "Steam"
+          }
+        }
+      },
+      {
+        "index": 4,
+        "change": {
+          "volume": "{value}"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": "control-page-roller",
+  "kind": "control",
+  "name": "Page roller",
+  "about": "Rolls through the pages of the profile",
+  "category": "Navigation",
+  "needs": [
+    "roller"
+  ],
+  "controls": {
+    "roller": [
+      {
+        "side": "right",
+        "away": {
+          "page": "prev"
+        },
+        "toward": {
+          "page": "next"
+        }
+      }
+    ]
+  }
+}

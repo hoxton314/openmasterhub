@@ -1,0 +1,156 @@
+{
+  "id": "desktop-fallback",
+  "kind": "profile",
+  "name": "Desktop fallback",
+  "about": "Everyday keys, volume and a clock; the base of other profiles",
+  "category": "Everyday",
+  "needs": [
+    "keypad",
+    "dial"
+  ],
+  "profile": {
+    "name": "Desktop",
+    "color": "#5B6170",
+    "about": "Everyday keys: apps, media, volume. The base of most profiles.",
+    "page": [
+      {
+        "name": "Main",
+        "key": [
+          {
+            "index": 0,
+            "label": "Play",
+            "press": {
+              "keys": "playpause"
+            },
+            "background": "#1e5ac8"
+          },
+          {
+            "index": 1,
+            "label": "Prev",
+            "press": {
+              "keys": "previoussong"
+            },
+            "background": "#283c64"
+          },
+          {
+            "index": 2,
+            "label": "Next",
+            "press": {
+              "keys": "nextsong"
+            },
+            "background": "#283c64"
+          },
+          {
+            "index": 3,
+            "widget": {
+              "kind": "clock"
+            }
+          },
+          {
+            "index": 4,
+            "label": "Mute",
+            "press": {
+              "mute": "toggle"
+            },
+            "background": "#c81e1e"
+          },
+          {
+            "index": 5,
+            "widget": {
+              "kind": "cpu_usage"
+            }
+          },
+          {
+            "index": 6,
+            "widget": {
+              "kind": "ram_usage"
+            }
+          },
+          {
+            "index": 14,
+            "label": "Page 2",
+            "press": {
+              "page": "next"
+            },
+            "background": "#3a3a46"
+          }
+        ]
+      },
+      {
+        "name": "Page 2",
+        "key": [
+          {
+            "index": 0,
+            "label": "Screenshot",
+            "press": {
+              "keys": "printscreen"
+            }
+          },
+          {
+            "index": 1,
+            "label": "Lock",
+            "press": {
+              "keys": "meta+l"
+            }
+          },
+          {
+            "index": 14,
+            "label": "Page 1",
+            "press": {
+              "page": "next"
+            },
+            "background": "#3a3a46"
+          }
+        ]
+      }
+    ],
+    "dial": {
+      "widget": {
+        "kind": "volume"
+      },
+      "cw": {
+        "volume": "+2"
+      },
+      "ccw": {
+        "volume": "-2"
+      },
+      "press": {
+        "mute": "toggle"
+      }
+    },
+    "knob": [
+      {
+        "index": 2,
+        "cw": {
+          "keys": "volumeup"
+        },
+        "ccw": {
+          "keys": "volumedown"
+        },
+        "press": {
+          "keys": "mute"
+        }
+      }
+    ],
+    "roller": [
+      {
+        "side": "left",
+        "away": {
+          "keys": "up"
+        },
+        "toward": {
+          "keys": "down"
+        }
+      },
+      {
+        "side": "right",
+        "away": {
+          "keys": "pageup"
+        },
+        "toward": {
+          "keys": "pagedown"
+        }
+      }
+    ]
+  }
+}

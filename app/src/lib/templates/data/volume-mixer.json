@@ -1,0 +1,130 @@
+{
+  "id": "volume-mixer",
+  "kind": "profile",
+  "name": "Volume mixer",
+  "about": "Five apps on five faders, mute on press",
+  "category": "Audio",
+  "needs": [
+    "keypad",
+    "fader"
+  ],
+  "profile": {
+    "name": "Volume mixer",
+    "color": "#2F8F66",
+    "about": "Five apps on five faders, mute on press",
+    "fader": [
+      {
+        "index": 0,
+        "change": {
+          "volume": {
+            "level": "{value}",
+            "app": "Discord"
+          }
+        }
+      },
+      {
+        "index": 1,
+        "change": {
+          "volume": {
+            "level": "{value}",
+            "app": "Spotify"
+          }
+        }
+      },
+      {
+        "index": 2,
+        "change": {
+          "volume": {
+            "level": "{value}",
+            "app": "firefox"
+          }
+        }
+      },
+      {
+        "index": 3,
+        "change": {
+          "volume": {
+            "level": "{value}",
+            "app": "Steam"
+          }
+        }
+      },
+      {
+        "index": 4,
+        "change": {
+          "volume": "{value}"
+        }
+      }
+    ],
+    "page": [
+      {
+        "name": "Mute",
+        "key": [
+          {
+            "index": 0,
+            "label": "Discord",
+            "press": {
+              "mute": {
+                "state": "toggle",
+                "app": "Discord"
+              }
+            },
+            "background": "#2a3a36",
+            "text_color": "#9fe0c8"
+          },
+          {
+            "index": 1,
+            "label": "Spotify",
+            "press": {
+              "mute": {
+                "state": "toggle",
+                "app": "Spotify"
+              }
+            },
+            "background": "#2a3a36",
+            "text_color": "#9fe0c8"
+          },
+          {
+            "index": 2,
+            "label": "firefox",
+            "press": {
+              "mute": {
+                "state": "toggle",
+                "app": "firefox"
+              }
+            },
+            "background": "#2a3a36",
+            "text_color": "#9fe0c8"
+          },
+          {
+            "index": 3,
+            "label": "Steam",
+            "press": {
+              "mute": {
+                "state": "toggle",
+                "app": "Steam"
+              }
+            },
+            "background": "#2a3a36",
+            "text_color": "#9fe0c8"
+          },
+          {
+            "index": 4,
+            "label": "Output",
+            "press": {
+              "mute": "toggle"
+            },
+            "background": "#2a3a36",
+            "text_color": "#9fe0c8"
+          },
+          {
+            "index": 10,
+            "widget": {
+              "kind": "volume"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

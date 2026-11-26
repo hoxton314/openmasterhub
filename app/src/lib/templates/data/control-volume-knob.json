@@ -1,0 +1,26 @@
+{
+  "id": "control-volume-knob",
+  "kind": "control",
+  "name": "Volume knob",
+  "about": "Turn for volume, press to mute",
+  "category": "Audio",
+  "needs": [
+    "knob"
+  ],
+  "controls": {
+    "knob": [
+      {
+        "index": 2,
+        "cw": {
+          "keys": "volumeup"
+        },
+        "ccw": {
+          "keys": "volumedown"
+        },
+        "press": {
+          "keys": "mute"
+        }
+      }
+    ]
+  }
+}
