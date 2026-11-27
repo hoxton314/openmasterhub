@@ -99,6 +99,15 @@
     margin: 0;
     overflow: hidden;
   }
+  /* The surface can stay taller than the card (WebKitGTK's minimum height on a Wayland layer
+     surface), so keep the card in the anchored bottom-right corner. */
+  :global(html.overlay #app) {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: flex-end;
+    height: 100vh;
+  }
   .card {
     display: flex;
     align-items: center;

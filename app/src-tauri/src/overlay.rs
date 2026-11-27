@@ -154,6 +154,7 @@ pub fn on_change(app: &AppHandle, prev: Option<&HubState>, new: &HubState) {
     if !setup_changed && !profile_changed && !pin_changed {
         return;
     }
+    log::debug!("switch overlay: change setup={setup_changed} profile={profile_changed} pin={pin_changed} backend={}", BACKEND.load(Ordering::Relaxed));
     if BACKEND.load(Ordering::Relaxed) == NONE {
         return;
     }
@@ -161,9 +162,13 @@ pub fn on_change(app: &AppHandle, prev: Option<&HubState>, new: &HubState) {
     let (toast, in_fullscreen) = {
         let live = state.live.lock().unwrap();
         if live.feedback(|f| f.toast) == Some(false) || !wanted(live.overlay_mode(), prev, new, setup_changed) {
+            log::debug!("switch overlay: not wanted ({:?})", new.reason);
             return;
         }
-        let Some(config) = live.config.as_ref() else { return };
+        let Some(config) = live.config.as_ref() else {
+            log::debug!("switch overlay: no config");
+            return;
+        };
         let d = describe(config, new);
         let app_settings = config.app.clone();
         let theme = serde_json::to_value(&app_settings).ok();
@@ -200,9 +205,11 @@ pub fn on_change(app: &AppHandle, prev: Option<&HubState>, new: &HubState) {
     };
     // The app's own window is in front: it shows the change itself.
     if app.get_webview_window("main").is_some_and(|w| w.is_focused().unwrap_or(false)) {
+        log::debug!("switch overlay: main window focused");
         return;
     }
     if !in_fullscreen && fullscreen_in_front() {
+        log::debug!("switch overlay: fullscreen in front");
         return;
     }
     show(app, toast);
@@ -214,6 +221,7 @@ fn show(app: &AppHandle, mut toast: Toast) {
     }
     let generation = app.state::<AppState>().overlay_generation.fetch_add(1, Ordering::Relaxed) + 1;
     toast.generation = generation;
+    log::debug!("switch overlay: show {generation}");
     let secs = toast.secs;
     // The page draws the card, measures it and answers with `overlay_fit`, which shows the window.
     if let Err(e) = app.emit_to(LABEL, "overlay:show", toast) {
@@ -233,6 +241,7 @@ fn show(app: &AppHandle, mut toast: Toast) {
 /// The page measured its card (logical px): size the window to it, place it and show it.
 #[tauri::command]
 pub fn overlay_fit(app: AppHandle, state: tauri::State<AppState>, generation: u64, width: f64, height: f64) {
+    log::debug!("switch overlay: fit {generation} {width}x{height}");
     if state.overlay_generation.load(Ordering::Relaxed) != generation || !(8.0..=1200.0).contains(&width) || !(8.0..=1200.0).contains(&height) {
         return;
     }
