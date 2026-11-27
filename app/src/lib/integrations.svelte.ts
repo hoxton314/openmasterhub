@@ -7,7 +7,7 @@ import { games, refreshGames } from './games.svelte';
 import { hub } from './hub.svelte';
 import type { ClaimInfo, Controls, GameStatus, ModuleKind } from './types';
 
-/** Colours the service uses when `[status]` leaves them out (docs/CLAUDE_CODE.md). */
+/** Device (LED and key) colours the service uses when `[status]` leaves them out (docs/CLAUDE_CODE.md). Data, not UI colours: they stay out of the themes. */
 export const STATUS_DEFAULTS = { attention: '#ff4000', ready: '#00ff40', working: '#0060ff' } as const;
 
 export type IntegrationState = 'checking' | 'off' | 'needs_setup' | 'on' | 'running' | 'bridge_down' | 'error';

@@ -15,11 +15,20 @@ describe('starting setups', () => {
     expect(c.profile?.map((p) => p.name)).toEqual(['Blender', 'Desktop']);
   });
 
-  it('reuses profiles and setups that exist', () => {
+  it('builds Streaming and Play from the bundled setup templates', () => {
+    const c: Config = { backlight: 80 };
+    expect(apply(c, 'streaming', [])).toBe('Stream');
+    expect(apply(c, 'play', [])).toBe('Play');
+    expect(c.setup?.map((s) => [s.name, s.mode])).toEqual([['Stream', 'manual'], ['Play', 'follow']]);
+    expect(c.profile?.map((p) => p.name)).toEqual(['Streaming', 'Desktop media']);
+    expect(c.setup?.[1].fallback).toBe('Desktop media');
+  });
+
+  it('never duplicates names that exist', () => {
     const c: Config = { backlight: 80, profile: [{ name: 'Desktop' }], setup: [{ name: 'Play' }] };
-    apply(c, 'play', []);
-    expect(c.profile).toHaveLength(1);
-    expect(c.setup).toHaveLength(1);
+    expect(apply(c, 'play', [])).toBe('Play 2');
+    expect(new Set(c.profile?.map((p) => p.name)).size).toBe(c.profile?.length);
+    expect(c.setup?.map((s) => s.name)).toEqual(['Play', 'Play 2']);
   });
 
   it('start empty adds one profile and no setup', () => {

@@ -4,14 +4,15 @@
   import { Library as LibraryIcon } from 'lucide-svelte';
   import { onMount } from 'svelte';
   import { games } from '../../lib/games.svelte';
-  import { hub, toast } from '../../lib/hub.svelte';
+  import { currentProfile, edit, hub, profileMut, undo } from '../../lib/hub.svelte';
   import { integrationEntries, refreshIntegrations, type IntegrationEntry } from '../../lib/integrations.svelte';
-  import { listTemplates, moduleWarning, needsLabels, type Template } from '../../lib/templates';
+  import { applyControls, instantiate, listTemplates, moduleWarning, needsLabels, type Template } from '../../lib/templates';
   import type { ModuleKind, Profile } from '../../lib/types';
   import { ui } from '../../lib/ui.svelte';
+  import { createFromTemplate } from '../setups/ops';
   import Layout from '../shell/Layout.svelte';
   import Breadcrumb, { type Crumb } from '../ui/Breadcrumb.svelte';
-    import TemplatePreview from '../profiles/TemplatePreview.svelte';
+  import TemplatePreview from '../profiles/TemplatePreview.svelte';
   import EmptyState from '../ui/EmptyState.svelte';
   import SectionLabel from '../ui/SectionLabel.svelte';
   import TemplateCard from '../ui/TemplateCard.svelte';
@@ -82,15 +83,23 @@
     else ui.open({ view: 'integration', id: e.id });
   }
 
+  /** Profile templates open the new-profile flow on that template; setups and controls are added right away, with Undo. */
   function use(t: Template) {
-    if (t.kind === 'profile') ui.openNewProfile({});
-    else if (t.kind === 'setup') {
-      ui.go('setups');
-      toast(`Pick “${t.name}” in New setup`);
-    } else {
-      ui.go('editor');
-      toast(`Select a control, then apply “${t.name}” from its inspector`);
+    if (t.kind === 'profile') return ui.openNewProfile({ template: t.id });
+    if (t.kind === 'setup') {
+      const name = createFromTemplate(t);
+      if (!name) return;
+      ui.go('setups', { view: 'setup-detail', setup: name });
+      return ui.toast({ text: `Added the setup ${name}`, kind: 'success', action: { label: 'Undo', run: () => undo() } });
     }
+    const target = currentProfile()?.name;
+    if (!target) return ui.toast({ text: 'There is no profile to apply this to yet. Create one first.', kind: 'warning' });
+    edit((c) => {
+      const p = profileMut(c);
+      applyControls(p, instantiate(t, c).controls ?? {});
+    }, { label: `apply ${t.name}` });
+    ui.go('editor');
+    ui.toast({ text: `Applied ${t.name} to ${target}`, kind: 'success', action: { label: 'Undo', run: () => undo() } });
   }
 
   const crumbs = $derived.by<Crumb[]>(() => {

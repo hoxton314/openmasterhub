@@ -1,7 +1,7 @@
-// The starting setups offered on the last first-run step. They are small on purpose: profiles
-// with one empty page each, ready to be filled in the editor. Bundled templates with real
-// controls live in lib/templates (Library, New setup).
+// The starting setups offered on the last first-run step, built from the bundled templates in
+// lib/templates (the same `instantiate` the Library and New setup use).
 
+import { getTemplate, instantiate, type Template } from '../../lib/templates';
 import type { Config, Profile, Setup } from '../../lib/types';
 
 export type StartingId = 'work' | 'streaming' | 'play' | 'empty';
@@ -18,8 +18,8 @@ export interface Starting {
 
 export const STARTINGS: Starting[] = [
   { icon: Briefcase, id: 'work', title: 'Work', about: 'Profiles for the apps you have open, and a Desktop fallback' },
-  { icon: Radio, id: 'streaming', title: 'Streaming', about: 'Four manual scenes: Starting soon, Live, BRB, Ending' },
-  { icon: Gamepad2, id: 'play', title: 'Play', about: 'Your games, plus game modes you approve later from Library' },
+  { icon: Radio, id: 'streaming', title: 'Streaming', about: 'A manual setup with OBS scene keys, cycled by hand' },
+  { icon: Gamepad2, id: 'play', title: 'Play', about: 'Follows the running game, with a quiet desktop otherwise. Game modes you approve later from Library' },
   { icon: Square, id: 'empty', title: 'Start empty', about: 'One blank profile' },
 ];
 
@@ -35,33 +35,43 @@ const KNOWN: [RegExp, string][] = [
   [/code|zed|jetbrains|idea|nvim/i, 'Editor'],
 ];
 
-const page = () => [{ name: 'Main', key: [] }];
-const blank = (name: string, extra: Partial<Profile> = {}): Profile => ({ name, page: page(), ...extra });
+const blank = (name: string, extra: Partial<Profile> = {}): Profile => ({ name, page: [{ name: 'Main', key: [] }], ...extra });
+
+const template = (id: string): Template => {
+  const t = getTemplate(id);
+  if (!t) throw new Error(`missing bundled template ${id}`);
+  return t;
+};
 
 /** Profiles for the open windows: one per recognised app, the first window class of each. */
 export function workProfiles(openClasses: string[]): Profile[] {
   const out: Profile[] = [];
   for (const [re, name] of KNOWN) {
     const hit = openClasses.filter((c) => re.test(c));
-    if (hit.length && !out.some((p) => p.name === name)) out.push({ name, apps: hit.slice(0, 2), about: `Keys for ${name}`, page: page() });
+    if (hit.length && !out.some((p) => p.name === name)) out.push({ name, apps: hit.slice(0, 2), about: `Keys for ${name}`, page: [{ name: 'Main', key: [] }] });
   }
   return out;
 }
 
-/** What to add to the config for a starting choice. Existing profile names are reused, not duplicated. */
-export function build(id: StartingId, openClasses: string[]): { profiles: Profile[]; setup?: Setup } {
-  const desktop = blank('Desktop', { about: 'When nothing else matches' });
+/**
+ * What to add to the config for a starting choice, from the bundled templates (Streaming, Games
+ * and the Desktop fallback are `instantiate`d like in the Library); Work is built from the open windows.
+ */
+export function build(id: StartingId, openClasses: string[], config: Config = { backlight: 0 }): { profiles: Profile[]; setup?: Setup } {
   switch (id) {
     case 'work': {
-      const profiles = workProfiles(openClasses);
-      return { profiles: [...profiles, desktop], setup: { name: 'Work', mode: 'follow', profiles: profiles.map((p) => p.name), fallback: 'Desktop' } };
+      const apps = workProfiles(openClasses);
+      const desktop = instantiate(template('desktop-fallback'), config, { name: 'Desktop' }).profiles[0];
+      return { profiles: [...apps, desktop], setup: { name: 'Work', mode: 'follow', profiles: apps.map((p) => p.name), fallback: desktop.name } };
     }
     case 'streaming': {
-      const names = ['Starting soon', 'Live', 'BRB', 'Ending'];
-      return { profiles: names.map((n) => blank(n)), setup: { name: 'Stream', mode: 'manual', profiles: names, wrap: true } };
+      const made = instantiate(template('setup-streaming'), config, { name: 'Stream' });
+      return { profiles: made.profiles, setup: made.setup };
     }
-    case 'play':
-      return { profiles: [desktop], setup: { name: 'Play', mode: 'follow', profiles: [], fallback: 'Desktop' } };
+    case 'play': {
+      const made = instantiate(template('setup-games'), config, { name: 'Play' });
+      return { profiles: made.profiles, setup: made.setup };
+    }
     default:
       return { profiles: [blank('Desktop')] };
   }
@@ -69,7 +79,7 @@ export function build(id: StartingId, openClasses: string[]): { profiles: Profil
 
 /** Add a starting choice to the config; returns the name of the setup to switch to, if any. */
 export function apply(c: Config, id: StartingId, openClasses: string[]): string | undefined {
-  const { profiles, setup } = build(id, openClasses);
+  const { profiles, setup } = build(id, openClasses, c);
   const have = new Set((c.profile ?? []).map((p) => p.name));
   c.profile = [...(c.profile ?? []), ...profiles.filter((p) => !have.has(p.name))];
   if (!setup) return undefined;

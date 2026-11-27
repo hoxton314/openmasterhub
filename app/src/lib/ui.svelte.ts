@@ -55,6 +55,8 @@ export interface NewProfileRequest {
   setup?: string;
   /** Position in the setup's list (default: last before the fallback). */
   position?: number;
+  /** Id of a profile template to start from (default: the first). */
+  template?: string;
 }
 
 let nextToast = 1;

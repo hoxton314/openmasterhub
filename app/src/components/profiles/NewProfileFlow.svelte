@@ -8,7 +8,7 @@
   import { invoke } from '../../lib/backend';
   import { edit, editProfile, hub, editor, toastUndo } from '../../lib/hub.svelte';
   import { activeSetup, effectiveSetups, globMatch, looseProfiles, setupByName } from '../../lib/model';
-  import { instantiate, listTemplates, missingModules, moduleWarning, needsLabels, uniqueName, type Template } from '../../lib/templates';
+  import { getTemplate, instantiate, listTemplates, missingModules, moduleWarning, needsLabels, uniqueName, type Template } from '../../lib/templates';
   import type { GameStatus, ModuleKind, Profile } from '../../lib/types';
   import { ui } from '../../lib/ui.svelte';
   import Avatar from '../ui/Avatar.svelte';
@@ -66,7 +66,7 @@
   onMount(() => {
     invoke<string[]>('open_window_classes').then((w) => (windows = w ?? [])).catch(() => {});
     invoke<GameStatus[]>('games_list').then((g) => (games = g ?? [])).catch(() => {});
-    picked = fromTemplate(listTemplates('profile')[0]);
+    picked = fromTemplate(getTemplate(req.template ?? '') ?? listTemplates('profile')[0]);
   });
 
   const templates = $derived(listTemplates('profile'));

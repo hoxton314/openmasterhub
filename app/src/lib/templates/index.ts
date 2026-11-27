@@ -149,3 +149,12 @@ export function instantiate(template: Template, config: Config, opts: Instantiat
   };
   return { profiles: [...profiles, ...(fallback ? [fallback] : [])], setup };
 }
+
+/** Merge a control template's controls into a profile: a dial or a knob/fader/roller replaces the one at the same index or side. */
+export function applyControls(profile: Profile, fragment: ControlsFragment): void {
+  const f = copy(fragment);
+  if (f.dial) profile.dial = f.dial;
+  if (f.knob) profile.knob = [...(profile.knob ?? []).filter((k) => !f.knob!.some((n) => n.index === k.index)), ...f.knob].sort((a, b) => a.index - b.index);
+  if (f.fader) profile.fader = [...(profile.fader ?? []).filter((k) => !f.fader!.some((n) => n.index === k.index)), ...f.fader].sort((a, b) => a.index - b.index);
+  if (f.roller) profile.roller = [...(profile.roller ?? []).filter((k) => !f.roller!.some((n) => n.side === k.side)), ...f.roller];
+}
