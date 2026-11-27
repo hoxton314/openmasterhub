@@ -449,6 +449,10 @@ impl Controller {
             owns: crate::surface::collect(&self.claims.owned_by(claim)),
             key_turn: turn(ModuleKind::Keypad),
             dial_turn: turn(ModuleKind::Dial),
+            priority: Some(c.priority),
+            apps: c.apps.clone(),
+            pid: None,
+            program: None,
         }));
     }
 
@@ -646,9 +650,15 @@ impl Controller {
                 self.folders.pop();
             }
             Action::Profile(name) => {
-                if let Some(i) = self.config.profiles.iter().position(|p| &p.name == name) {
-                    self.switch_profile(i);
+                match self.config.profiles.iter().position(|p| &p.name == name) {
+                    Some(i) => self.switch_profile(i),
+                    None => log::warn!("profile {name:?}: not supported by this masterhubd yet"),
                 }
+                return true;
+            }
+            // Setups are not implemented yet: the config may already use them.
+            Action::Setup(_) | Action::Pin(_) => {
+                log::warn!("{action:?}: not supported by this masterhubd yet");
                 return true;
             }
             Action::Cmd(_)
@@ -1079,7 +1089,7 @@ impl Controller {
             }
             None => None,
         };
-        let live = face.widget.as_ref().and_then(|w| self.live.get(w));
+        let live = face.widget.as_ref().and_then(|w| self.live.get(&w.widget));
         let turn = self.turn_for(serial);
         let jpeg = match self.renderer.render(&face, size, frame, live, turn) {
             Ok(j) => Arc::new(j),
@@ -1177,7 +1187,7 @@ impl Controller {
                     continue;
                 }
                 if let Some(w) = self.face_for(t).and_then(|f| f.widget) {
-                    needed.push(w);
+                    needed.push(w.widget);
                 }
             }
         }
@@ -1338,6 +1348,7 @@ impl Controller {
             horizontal: self.config.orientation.rotation(self.sensor_horizontal) % 180 == 90,
             rotation: self.config.orientation.rotation(self.sensor_horizontal),
             active_app: self.active_app.clone(),
+            ..Default::default()
         };
         let changed = {
             let mut s = self.snapshot.lock().unwrap();
@@ -1368,6 +1379,7 @@ impl Controller {
                     socket,
                     placement,
                     firmware: m.firmware.clone(),
+                    needs_replug: false,
                 }
             })
             .collect();

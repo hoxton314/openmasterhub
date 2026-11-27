@@ -45,6 +45,28 @@
 # The first profile is the default. Other profiles activate when the focused window's class
 # matches one of their `apps` (Hyprland window class, or the .exe name on Windows;
 # case-insensitive, * wildcards).
+#
+# Setups (written by the app; the service accepts them, switching between them comes in a
+# later release). Without [[setup]] there is one setup, "Default", that works as described
+# above. A profile listed in several setups is the same profile.
+#
+#   [[setup]]
+#   name = "Work"
+#   mode = "follow"            # follow | manual | hybrid
+#   profiles = ["Blender", "Claude"]   # rule order (follow) or cycle order (manual)
+#   fallback = "Desktop"       # follow/hybrid: when no rule matches; not one of `profiles`
+#   color = "#5e63eb"
+#   shortcut = "ctrl+alt+1"    # switch to this setup
+#   # manual: wrap = true, next = "<shortcut>", prev = "<shortcut>"
+#   # hybrid: pin = "<shortcut>", release = "same_trigger" | "timeout" | "next_app",
+#   #         release_after = 10 (minutes, for "timeout")
+#
+# Also for setups: profile `base = "<profile>"` (controls it does not set come from there),
+# `color`, `about`; pinned `except_setups = ["<setup>"]`; actions { setup = "<name>" | "next"
+# | "prev" }, { profile = "next" | "prev" }, { pin = "toggle" | "release" },
+# { keys = { combo = "o", hold = 700 } }; dial `long_press`; faces `fit = "fit" | "fill" |
+# "center"`, `label_over_image`, widget `refresh = <seconds>`; [status] `blink_on_setup`;
+# [leds] `knob_volume`, `knob_mute_red`; and [app] for the app's own settings (theme, …).
 
 backlight = 80
 

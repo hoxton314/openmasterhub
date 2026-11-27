@@ -15,7 +15,7 @@ use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::{ListenerOptions, SendHalf, Stream};
 use masterhub_core::config::Config;
 use masterhub_core::ipc::{
-    DisplayImage, Event, Request, RequestMsg, Response, ServerMsg, TARGET_DIAL, socket_name, write_line,
+    DisplayImage, Event, Request, RequestMsg, Response, ServerMsg, TARGET_DIAL, capability, socket_name, write_line,
 };
 use serde::Serialize;
 
@@ -110,10 +110,22 @@ fn client(stream: Stream, controller: Sender<Msg>, snapshot: Arc<Mutex<Snapshot>
     log::debug!("app disconnected");
 }
 
+/// What this service implements beyond the 0.8 baseline (`get_capabilities`). Add a name here
+/// when its behaviour lands; the app hides the controls of missing ones.
+pub const CAPABILITIES: &[&str] = &[
+    // `keys = { combo, hold }` runs as `combo@hold`.
+    capability::HOLD,
+];
+
 /// Live-surface claim ids, unique for the service's lifetime.
 static NEXT_CLAIM: AtomicU64 = AtomicU64::new(1);
 /// Largest frame accepted (a 240×240 JPEG at high quality is ~30 KB).
 const MAX_FRAME: usize = 256 * 1024;
+
+/// The wire name of a request, e.g. `set_setup`.
+fn method(request: &Request) -> String {
+    serde_json::to_value(request).ok().and_then(|v| v.get("method")?.as_str().map(str::to_owned)).unwrap_or_default()
+}
 
 fn json<T: Serialize>(v: T) -> Result<serde_json::Value> {
     Ok(serde_json::to_value(v)?)
@@ -229,5 +241,33 @@ fn handle(
             controller.send(Msg::Led { claim, zone, mode, color: color.map(|c| c.0), brightness })?;
             json(())
         }
+        Request::GetCapabilities => json(CAPABILITIES),
+        Request::SetSetup { .. }
+        | Request::Pin { .. }
+        | Request::ReleasePin
+        | Request::Identify { .. }
+        | Request::PreviewProfile { .. }
+        | Request::ReleaseClaim { .. }
+        | Request::GetSystemInfo => bail!("{} is not supported by this masterhubd", method(&request)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capabilities_are_known_names() {
+        // Only names the app knows (`Capability` in app/src/lib/types.ts).
+        let known = [
+            capability::SETUPS, capability::BASE, capability::HOLD, capability::LONG_PRESS, capability::SETUP_ACTION,
+            capability::PROFILE_CYCLE, capability::PIN, capability::EXCEPT_SETUPS, capability::BLINK_ON_SETUP,
+            capability::KNOB_VOLUME, capability::FACE_FIT, capability::WIDGET_REFRESH, capability::IDENTIFY,
+            capability::NEEDS_REPLUG, capability::SYSTEM_INFO, capability::PREVIEW_PROFILE, capability::RELEASE_CLAIM,
+            capability::CLAIM_DETAILS,
+        ];
+        assert!(CAPABILITIES.iter().all(|c| known.contains(c)));
+        assert_eq!(method(&Request::SetSetup { name: "x".into() }), "set_setup");
+        assert_eq!(method(&Request::ReleasePin), "release_pin");
     }
 }

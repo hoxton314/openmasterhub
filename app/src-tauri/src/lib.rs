@@ -1,14 +1,16 @@
 //! OpenMasterHUB desktop app: a Tauri shell around the Svelte UI. The Rust side talks to the
 //! masterhubd service and forwards its live events to the UI.
 
+mod files;
 mod games;
+mod themes;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use base64::Engine;
 use masterhub_core::config::{self, Config, Face, Widget};
-use masterhub_core::ipc::{Client, ClientEvent, DisplayImage, Event, HubState, ModuleState, Status};
+use masterhub_core::ipc::{Client, ClientEvent, DisplayImage, Event, HubState, ModuleState, SessionInfo, Status};
 use masterhub_core::render::{KEY_SIZE, LiveData, Picture, Renderer, load_picture};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -36,6 +38,8 @@ struct Snapshot {
     modules: Vec<ModuleState>,
     state: Option<HubState>,
     displays: Vec<Display>,
+    /// What the service implements beyond 0.8 (`get_capabilities`); empty for older services.
+    capabilities: Vec<String>,
 }
 
 fn data_url(jpeg: &[u8]) -> String {
@@ -52,7 +56,15 @@ fn err(e: impl std::fmt::Display) -> String {
 fn snapshot(state: State<AppState>) -> Snapshot {
     let c = &state.client;
     if !c.is_online() {
-        return Snapshot { online: false, config: None, config_path: None, modules: Vec::new(), state: None, displays: Vec::new() };
+        return Snapshot {
+            online: false,
+            config: None,
+            config_path: None,
+            modules: Vec::new(),
+            state: None,
+            displays: Vec::new(),
+            capabilities: Vec::new(),
+        };
     }
     let path = c.config_path().ok();
     let dir = path.as_deref().and_then(|p| Path::new(p).parent()).map(Path::to_owned).unwrap_or_else(|| PathBuf::from("."));
@@ -69,6 +81,7 @@ fn snapshot(state: State<AppState>) -> Snapshot {
             .into_iter()
             .map(Display::from)
             .collect(),
+        capabilities: c.capabilities(),
     }
 }
 
@@ -86,6 +99,32 @@ fn set_profile(state: State<AppState>, name: String) -> Result<(), String> {
     state.client.set_profile(&name).map_err(err)
 }
 
+/// Make a setup active (services with capability `setups`).
+#[tauri::command]
+fn set_setup(state: State<AppState>, name: String) -> Result<(), String> {
+    state.client.set_setup(&name).map_err(err)
+}
+
+/// End any client's claim (services with capability `release_claim`).
+#[tauri::command]
+fn release_claim(state: State<AppState>, claim: u64) -> Result<(), String> {
+    state.client.call(masterhub_core::ipc::Request::ReleaseClaim { claim }).map(|_| ()).map_err(err)
+}
+
+/// A Claude Code session as the Integrations page lists it.
+#[derive(Serialize)]
+struct ClaudeSession {
+    name: String,
+    status: Status,
+}
+
+/// The open Claude Code sessions the service knows, in slot order.
+#[tauri::command]
+fn claude_sessions(state: State<AppState>) -> Vec<ClaudeSession> {
+    let sessions = state.client.call(masterhub_core::ipc::Request::GetSessions).and_then(|v| Ok(serde_json::from_value::<Vec<SessionInfo>>(v)?));
+    sessions.unwrap_or_default().into_iter().map(|s| ClaudeSession { name: s.name, status: s.status }).collect()
+}
+
 #[tauri::command]
 fn show_page(state: State<AppState>, name: String) -> Result<(), String> {
     state.client.show_page(&name).map_err(err)
@@ -99,7 +138,7 @@ fn preview_face(state: State<AppState>, face: Face) -> Result<String, String> {
         Picture::Still(i) => i,
         Picture::Animated(f) => &f[0].0,
     });
-    let live = face.widget.as_ref().map(|w| match w {
+    let live = face.widget.as_ref().map(|w| match &w.widget {
         Widget::Clock { .. } => LiveData::Text { text: "12:34".into(), caption: Some("Mon 12".into()) },
         Widget::NowPlaying => LiveData::Media { title: "Song title".into(), artist: "Artist".into(), art: None },
         Widget::ClaudeSession { slot } => LiveData::Session {
@@ -278,6 +317,9 @@ pub fn run() {
             save_config,
             set_profile,
             show_page,
+            set_setup,
+            release_claim,
+            claude_sessions,
             preview_face,
             open_window_classes,
             audio_info,
@@ -286,7 +328,18 @@ pub fn run() {
             games::games_list,
             games::games_plan,
             games::games_setup,
-            games::games_disable
+            games::games_disable,
+            themes::themes_list,
+            themes::themes_dir,
+            themes::open_themes_dir,
+            files::open_path,
+            files::import_toml,
+            files::export_toml,
+            files::template_save,
+            files::templates_list,
+            files::backup_config,
+            files::backups_list,
+            files::restore_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running the app");

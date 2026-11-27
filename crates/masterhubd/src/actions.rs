@@ -39,7 +39,8 @@ fn run(rx: Receiver<Request>) {
     loop {
         match rx.recv_timeout(Duration::from_millis(20)) {
             Ok(req) => match req.action {
-                Action::Keys(combo) => {
+                Action::Keys(keys) => {
+                    let combo = keys.combo();
                     if let Err(e) = keyboard.send(&combo) {
                         log::error!("keys {combo:?}: {e:#}");
                     }
@@ -62,7 +63,14 @@ fn run(rx: Receiver<Request>) {
                     None => log::error!("mute {m:?}: unknown audio group, or no focused app"),
                 },
                 // Navigation and sessions are handled by the controller and never reach this thread.
-                Action::Page(_) | Action::Folder(_) | Action::Back(_) | Action::Profile(_) | Action::Session(_) | Action::Sessions(_) => {}
+                Action::Page(_)
+                | Action::Folder(_)
+                | Action::Back(_)
+                | Action::Profile(_)
+                | Action::Setup(_)
+                | Action::Pin(_)
+                | Action::Session(_)
+                | Action::Sessions(_) => {}
                 Action::Cmd(cmd) => {
                     let cmd = match req.value {
                         Some(v) => cmd.replace("{value}", &v.to_string()),
@@ -124,7 +132,7 @@ fn shell(cmd: &str) -> Command {
 /// Check all key names in the config up front, so typos are reported at startup.
 pub fn validate(action: &Action) -> Result<()> {
     match action {
-        Action::Keys(k) => crate::keyboard::validate(k),
+        Action::Keys(k) => crate::keyboard::validate(&k.combo()),
         _ => Ok(()),
     }
 }

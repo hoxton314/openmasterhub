@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Settings of the desktop app (theme, density, …). The service ignores them.
+    #[serde(default, skip_serializing_if = "AppSettings::is_empty")]
+    pub app: AppSettings,
     /// TTF/OTF font for labels. Defaults to `fc-match sans:bold`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<PathBuf>,
@@ -32,6 +35,10 @@ pub struct Config {
     /// the page's own key there, e.g. a key that opens the Claude profile from anywhere.
     #[serde(default, rename = "pinned", skip_serializing_if = "Vec::is_empty")]
     pub pinned: Vec<PinnedKey>,
+    /// Sets of profiles the user switches between (see [`Setup`]). None: one implicit setup,
+    /// see [`Config::effective_setups`].
+    #[serde(default, rename = "setup", skip_serializing_if = "Vec::is_empty")]
+    pub setups: Vec<Setup>,
     /// The first profile is the default; it is used when no other profile matches the
     /// focused application.
     #[serde(default, rename = "profile", skip_serializing_if = "Vec::is_empty")]
@@ -44,6 +51,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            app: AppSettings::default(),
             font: None,
             backlight: default_backlight(),
             leds: Leds::default(),
@@ -51,6 +59,7 @@ impl Default for Config {
             orientation: Orientation::Auto,
             upright: true,
             pinned: Vec::new(),
+            setups: Vec::new(),
             profiles: Vec::new(),
             audio_groups: Vec::new(),
         }
@@ -67,6 +76,143 @@ fn yes() -> bool {
 
 fn is_true(b: &bool) -> bool {
     *b
+}
+
+/// `[app]`: settings of the desktop app, kept in the same file so they travel with it. The
+/// service parses and ignores them; keys it does not know are kept as they are.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct AppSettings {
+    /// A theme id (bundled or user), or `"system"`: follow the OS between `theme_dark` and
+    /// `theme_light`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_dark: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme_light: Option<String>,
+    /// `compact` or `comfortable`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub density: Option<String>,
+    /// `system`, `on` or `off`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reduce_motion: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_run_done: Option<bool>,
+    /// How setup and profile switches are shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feedback: Option<Feedback>,
+    /// Settings of newer app versions, kept unchanged.
+    #[serde(flatten)]
+    pub other: toml::Table,
+}
+
+impl AppSettings {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// `[app.feedback]`: what the app shows on a switch.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Feedback {
+    /// A toast near the tray.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toast: Option<bool>,
+    /// A card on the dial.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dial: Option<bool>,
+    /// The Base LED blinks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub led: Option<bool>,
+    /// Also while a fullscreen window is focused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_fullscreen: Option<bool>,
+    #[serde(flatten)]
+    pub other: toml::Table,
+}
+
+/// The name of the setup a config without `[[setup]]` has.
+pub const IMPLICIT_SETUP: &str = "Default";
+
+/// `[[setup]]`: a set of profiles the user switches between, e.g. Work, Stream, Play. A profile
+/// listed in several setups is the same profile (linked).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Setup {
+    pub name: String,
+    /// Default: follow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<SetupMode>,
+    /// Profiles in priority (follow, hybrid) or cycle (manual) order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<String>,
+    /// Follow and hybrid: the profile used when no rule matches; never one of `profiles`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<String>,
+    /// LED blink, dial card ring and UI colour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<Color>,
+    /// Global shortcut that switches to this setup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortcut: Option<String>,
+    /// Show a dial card on profile changes in this setup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_on_dial: Option<bool>,
+    /// Manual: after the last profile comes the first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrap: Option<bool>,
+    /// Manual: global shortcut for the next profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+    /// Manual: global shortcut for the previous profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prev: Option<String>,
+    /// Hybrid: global shortcut that pins the live profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
+    /// Hybrid: when a pin ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release: Option<ReleasePolicy>,
+    /// Hybrid, `release = "timeout"`: minutes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_after: Option<u32>,
+}
+
+impl Setup {
+    pub fn mode(&self) -> SetupMode {
+        self.mode.unwrap_or_default()
+    }
+
+    /// Global shortcuts this setup defines (empty strings left out).
+    pub fn shortcuts(&self) -> impl Iterator<Item = &str> {
+        [&self.shortcut, &self.next, &self.prev, &self.pin].into_iter().flatten().map(String::as_str).filter(|s| !s.trim().is_empty())
+    }
+}
+
+/// How a setup picks its live profile.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetupMode {
+    /// The first profile whose apps match the focused window, else the fallback.
+    #[default]
+    Follow,
+    /// The user steps through the profiles.
+    Manual,
+    /// Follow, until the user pins a profile.
+    Hybrid,
+}
+
+/// When a hybrid setup's pin ends.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReleasePolicy {
+    /// The pin shortcut or action again.
+    #[default]
+    SameTrigger,
+    /// After `release_after` minutes.
+    Timeout,
+    /// When another app is focused.
+    NextApp,
 }
 
 /// How the Base lies on the desk, as seen by the user.
@@ -125,6 +271,16 @@ pub struct Profile {
     /// e.g. `["obs", "steam_app_*"]`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub apps: Vec<String>,
+    /// Controls this profile does not set come from this profile (by page position, folder
+    /// name, index or side).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    /// Avatar colour in the app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<Color>,
+    /// Description shown in the app (templates, cards).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
     /// Listed under Games in the app (`None`: when one of `apps` is a Steam game,
     /// `steam_app_*`). Only for the app; the service treats every profile alike.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -176,6 +332,12 @@ pub struct Leds {
     /// 1..=100
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub brightness: Option<u8>,
+    /// Knob rings show the volume level of their turn action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knob_volume: Option<bool>,
+    /// Knob rings turn red while their volume target is muted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub knob_mute_red: Option<bool>,
 }
 
 impl Leds {
@@ -199,6 +361,9 @@ pub struct StatusLeds {
     /// How session keys are ordered.
     #[serde(skip_serializing_if = "SessionSort::is_default")]
     pub sort: SessionSort,
+    /// The Base LED blinks twice in the new setup's colour when the setup changes.
+    #[serde(skip_serializing_if = "is_true")]
+    pub blink_on_setup: bool,
 }
 
 /// The order Claude Code sessions fill the `claude_session` slots in.
@@ -230,6 +395,7 @@ impl Default for StatusLeds {
             ready: Color(Rgb::new(0x00, 0xff, 0x40)),
             working: Color(Rgb::new(0x00, 0x60, 0xff)),
             sort: SessionSort::Urgent,
+            blink_on_setup: true,
         }
     }
 }
@@ -271,7 +437,49 @@ pub struct Face {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_color: Option<Color>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub widget: Option<Widget>,
+    pub widget: Option<FaceWidget>,
+    /// How the image is placed on the screen (default: fit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<ImageFit>,
+    /// Draw the label over the image instead of below it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_over_image: Option<bool>,
+}
+
+/// How a face's image is placed on its screen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageFit {
+    /// Whole image visible.
+    #[default]
+    Fit,
+    /// Cover the screen, cropping.
+    Fill,
+    /// Unscaled, centred.
+    Center,
+}
+
+/// A face's live widget: `{ kind = "cpu_usage", refresh = 2 }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FaceWidget {
+    #[serde(flatten)]
+    pub widget: Widget,
+    /// Seconds between updates (default: the widget's own rate).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<u16>,
+}
+
+impl From<Widget> for FaceWidget {
+    fn from(widget: Widget) -> Self {
+        Self { widget, refresh: None }
+    }
+}
+
+impl std::ops::Deref for FaceWidget {
+    type Target = Widget;
+    fn deref(&self) -> &Widget {
+        &self.widget
+    }
 }
 
 /// Live data drawn on a key or the dial.
@@ -355,6 +563,9 @@ pub struct PinnedKey {
     /// Profiles that show their own key there instead.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub except: Vec<String>,
+    /// Setups whose profiles all show their own key there instead.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub except_setups: Vec<String>,
 }
 
 impl Config {
@@ -381,6 +592,9 @@ pub struct DialConfig {
     pub press: Option<Action>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release: Option<Action>,
+    /// Held down for a while.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub long_press: Option<Action>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -433,16 +647,21 @@ pub struct RollerConfig {
 pub enum Action {
     /// Shell command run with `sh -c`. `{value}` is replaced for faders.
     Cmd(String),
-    /// Key combination sent through a virtual keyboard, e.g. `"ctrl+shift+m"` or `"playpause"`.
-    Keys(String),
+    /// Key combination sent through a virtual keyboard, e.g. `"ctrl+shift+m"` or `"playpause"`,
+    /// or `{ combo, hold }` to hold it `hold` ms.
+    Keys(KeysAction),
     /// Keypad page: `"next"`, `"prev"` or a page name.
     Page(String),
     /// Open a keypad folder by name.
     Folder(String),
     /// Leave the current folder.
     Back(bool),
-    /// Switch to a profile by name.
+    /// Switch to a profile by name, or `"next"`, `"prev"`, `"pick"` within the active setup.
     Profile(String),
+    /// Switch setup: a setup name, or `"next"`, `"prev"`, `"pick"`.
+    Setup(String),
+    /// Hybrid setups: pin the live profile (`toggle`) or release the pin.
+    Pin(PinAction),
     /// Volume: `"+2"`/`"-2"` change it by percentage points, `"40"` sets it, `"{value}"`
     /// follows a fader. Of the default output, or of `{ level, output | input | app | group }`.
     Volume(VolumeAction),
@@ -453,6 +672,55 @@ pub enum Action {
     Session(u8),
     /// Scroll the Claude Code session keys by a page: `"next"` or `"prev"`.
     Sessions(String),
+}
+
+/// A `keys` action: a combination tapped (`"ctrl+c"`, `"o@700"`) or held (`{ combo, hold }`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum KeysAction {
+    Tap(String),
+    Hold(KeysHold),
+}
+
+/// `keys` as a table: `combo` held for `hold` ms.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KeysHold {
+    pub combo: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold: Option<u32>,
+}
+
+impl KeysAction {
+    /// The combination in the keyboard's `combo` / `combo@ms` syntax.
+    pub fn combo(&self) -> String {
+        match self {
+            Self::Tap(c) => c.clone(),
+            Self::Hold(KeysHold { combo, hold: Some(ms) }) => format!("{combo}@{ms}"),
+            Self::Hold(KeysHold { combo, hold: None }) => combo.clone(),
+        }
+    }
+}
+
+impl From<&str> for KeysAction {
+    fn from(combo: &str) -> Self {
+        Self::Tap(combo.to_owned())
+    }
+}
+
+impl From<String> for KeysAction {
+    fn from(combo: String) -> Self {
+        Self::Tap(combo)
+    }
+}
+
+/// A `pin` action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PinAction {
+    /// Pin the live profile, or release the pin.
+    Toggle,
+    Release,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -688,8 +956,15 @@ impl<'de> Deserialize<'de> for Color {
 impl Config {
     /// Parse and validate, resolving relative paths against `base_dir`.
     pub fn parse(text: &str, base_dir: &Path) -> Result<Self> {
-        let mut cfg: Config = toml::from_str(text)?;
+        let cfg = Self::parse_unchecked(text, base_dir)?;
         cfg.validate()?;
+        Ok(cfg)
+    }
+
+    /// Parse without [`Config::validate`], e.g. profiles imported from a file that refer to
+    /// profiles or groups only the target config has.
+    pub fn parse_unchecked(text: &str, base_dir: &Path) -> Result<Self> {
+        let mut cfg: Config = toml::from_str(text)?;
         for profile in &mut cfg.profiles {
             let faces = profile
                 .pages
@@ -800,11 +1075,19 @@ impl Config {
             }
         }
         let pinned_actions = self.pinned.iter().flat_map(|p| [&p.key.press, &p.key.release]).flatten();
+        let setups = self.effective_setups();
         for action in self.profiles.iter().flat_map(Profile::actions).chain(pinned_actions) {
             if let Action::Profile(name) = action
+                && !is_step(name)
                 && !self.profiles.iter().any(|p| &p.name == name)
             {
                 bail!("profile {name:?} does not exist");
+            }
+            if let Action::Setup(name) = action
+                && !is_step(name)
+                && !setups.iter().any(|s| &s.name == name)
+            {
+                bail!("setup {name:?} does not exist");
             }
             if let Action::Sessions(d) = action
                 && d != "next"
@@ -823,7 +1106,88 @@ impl Config {
                 bail!("audio group {g:?} does not exist");
             }
         }
+        self.validate_setups()?;
+        for p in &self.pinned {
+            if let Some(s) = p.except_setups.iter().find(|s| !setups.iter().any(|x| &x.name == *s)) {
+                bail!("pinned key {}: setup {s:?} does not exist", p.key.index);
+            }
+        }
+        for p in &self.profiles {
+            let faces = p.pages.iter().chain(&p.folders).flat_map(|pg| &pg.keys).map(|k| &k.face).chain(p.dial.iter().map(|d| &d.face));
+            if faces.filter_map(|f| f.widget.as_ref()).any(|w| w.refresh == Some(0)) {
+                bail!("{}: widget refresh must be at least 1 second", p.name);
+            }
+        }
+        if self.pinned.iter().filter_map(|p| p.key.face.widget.as_ref()).any(|w| w.refresh == Some(0)) {
+            bail!("pinned key: widget refresh must be at least 1 second");
+        }
         Ok(())
+    }
+
+    /// Setups and profile bases: names unique, references exist, no cycles.
+    fn validate_setups(&self) -> Result<()> {
+        let profile = |name: &str| self.profiles.iter().any(|p| p.name == name);
+        let mut names = std::collections::HashSet::new();
+        for s in &self.setups {
+            if s.name.trim().is_empty() {
+                bail!("a setup has no name");
+            }
+            if !names.insert(s.name.as_str()) {
+                bail!("setup {:?} defined twice", s.name);
+            }
+            let mut listed = std::collections::HashSet::new();
+            for p in &s.profiles {
+                if !profile(p) {
+                    bail!("setup {:?}: profile {p:?} does not exist", s.name);
+                }
+                if !listed.insert(p.as_str()) {
+                    bail!("setup {:?}: profile {p:?} listed twice", s.name);
+                }
+            }
+            if let Some(f) = &s.fallback {
+                if !profile(f) {
+                    bail!("setup {:?}: fallback {f:?} does not exist", s.name);
+                }
+                if listed.contains(f.as_str()) {
+                    bail!("setup {:?}: fallback {f:?} is also in its profiles", s.name);
+                }
+            }
+            if s.release_after == Some(0) {
+                bail!("setup {:?}: release_after must be at least 1 minute", s.name);
+            }
+        }
+        for p in &self.profiles {
+            let mut seen = vec![p.name.as_str()];
+            let mut next = p.base.as_deref();
+            while let Some(b) = next {
+                let Some(base) = self.profiles.iter().find(|x| x.name == b) else {
+                    bail!("{}: base profile {b:?} does not exist", p.name);
+                };
+                if seen.contains(&b) {
+                    bail!("{}: base profiles form a cycle ({} → {b})", p.name, seen.join(" → "));
+                }
+                seen.push(b);
+                next = base.base.as_deref();
+            }
+        }
+        Ok(())
+    }
+
+    /// The setups, or for a config without `[[setup]]` the implicit one that behaves exactly
+    /// like [`Config::profile_for_app`]: [`IMPLICIT_SETUP`], follow, every profile but the
+    /// first, the first as fallback.
+    pub fn effective_setups(&self) -> Vec<Setup> {
+        if !self.setups.is_empty() {
+            return self.setups.clone();
+        }
+        let names: Vec<String> = self.profiles.iter().map(|p| p.name.clone()).collect();
+        vec![Setup {
+            name: IMPLICIT_SETUP.to_owned(),
+            mode: Some(SetupMode::Follow),
+            profiles: names.iter().skip(1).cloned().collect(),
+            fallback: names.first().cloned(),
+            ..Default::default()
+        }]
     }
 
     /// The profile to use for a focused window class: the first non-default profile whose
@@ -847,12 +1211,17 @@ impl Profile {
             .chain(&self.folders)
             .flat_map(|p| &p.keys)
             .flat_map(|k| [&k.press, &k.release])
-            .chain(self.dial.iter().flat_map(|d| [&d.cw, &d.ccw, &d.press, &d.release]))
+            .chain(self.dial.iter().flat_map(|d| [&d.cw, &d.ccw, &d.press, &d.release, &d.long_press]))
             .chain(self.faders.iter().map(|f| &f.change))
             .chain(self.knobs.iter().flat_map(|k| [&k.cw, &k.ccw, &k.press, &k.release]))
             .chain(self.rollers.iter().flat_map(|r| [&r.away, &r.toward]))
             .flatten()
     }
+}
+
+/// `"next"`, `"prev"` or `"pick"` in a `profile` or `setup` action.
+fn is_step(name: &str) -> bool {
+    matches!(name, "next" | "prev" | "pick")
 }
 
 /// Case-insensitive match with `*` wildcards.
@@ -922,7 +1291,7 @@ mod tests {
         assert_eq!(cfg.key("Default", main, pin.key.index), Some(&pin.key));
         assert_ne!(cfg.key("Claude", &claude.pages[0], pin.key.index), Some(&pin.key));
         let key = claude.pages[0].key(2).unwrap();
-        assert_eq!(key.face.widget, Some(Widget::ClaudeSession { slot: 2 }));
+        assert_eq!(key.face.widget, Some(Widget::ClaudeSession { slot: 2 }.into()));
         assert_eq!(key.press, Some(Action::Session(2)));
         let left = claude.rollers.iter().find(|r| r.side == Side::Left).unwrap();
         assert_eq!(left.toward, Some(Action::Sessions("next".into())));
@@ -953,7 +1322,7 @@ mod tests {
         .unwrap();
         let key = &cfg.profiles[0].pages[0].keys[0];
         assert_eq!(key.press, Some(Action::Keys("ctrl+shift+m".into())));
-        assert_eq!(key.face.widget, Some(Widget::Clock { format: Some("%H:%M:%S".into()) }));
+        assert_eq!(key.face.widget, Some(Widget::Clock { format: Some("%H:%M:%S".into()) }.into()));
     }
 
     #[test]
@@ -1076,5 +1445,205 @@ mod tests {
         assert!(bad(r#"{ volume = { level = "1", group = "nope" } }"#).is_err());
         assert!(bad(r#"{ volume = { level = "loud", app = "a" } }"#).is_err());
         assert!(bad(r#"{ volume = { level = "1", device = "a" } }"#).is_err());
+    }
+
+    /// No `[[setup]]`, `[app]` or other new key appears when a config does not set them.
+    #[test]
+    fn existing_configs_serialise_unchanged() {
+        for text in [include_str!("../../../examples/config.toml"), include_str!("../../../examples/starter.toml")] {
+            let cfg = Config::parse(text, Path::new("/x")).unwrap();
+            let toml = cfg.to_toml().unwrap();
+            for key in ["[app", "[[setup]]", "about =", "except_setups", "blink_on_setup", "knob_volume", "knob_mute_red", "long_press", "fit =", "label_over_image", "refresh ="] {
+                assert!(!toml.contains(key), "{key} in\n{toml}");
+            }
+            assert_eq!(Config::parse(&toml, Path::new("/x")).unwrap(), cfg);
+            // The app sends configs back as JSON.
+            let json = serde_json::to_string(&cfg).unwrap();
+            assert_eq!(serde_json::from_str::<Config>(&json).unwrap(), cfg);
+            assert!(!json.contains("\"app\"") && !json.contains("\"setup\""), "{json}");
+        }
+    }
+
+    const SETUPS: &str = r##"
+        [app]
+        theme = "system"
+        theme_dark = "orchid"
+        density = "compact"
+        first_run_done = true
+        future_setting = [1, 2]
+        [app.feedback]
+        toast = true
+        in_fullscreen = false
+
+        [status]
+        blink_on_setup = false
+
+        [leds]
+        knob_volume = true
+        knob_mute_red = true
+
+        [[setup]]
+        name = "Work"
+        mode = "follow"
+        profiles = ["Blender", "Claude"]
+        fallback = "Desktop"
+        color = "#5e63eb"
+        shortcut = "ctrl+alt+1"
+        show_on_dial = true
+
+        [[setup]]
+        name = "Stream"
+        mode = "manual"
+        profiles = ["Live", "Desktop"]
+        wrap = true
+        next = "ctrl+alt+f12"
+
+        [[setup]]
+        name = "Play"
+        mode = "hybrid"
+        profiles = ["Blender"]
+        fallback = "Desktop"
+        pin = "ctrl+alt+p"
+        release = "timeout"
+        release_after = 10
+
+        [[pinned]]
+        index = 8
+        except = ["Claude"]
+        except_setups = ["Stream"]
+        press = { setup = "next" }
+
+        [[profile]]
+        name = "Desktop"
+        color = "#c26a2b"
+        about = "Everything else"
+        [[profile.page]]
+        name = "Main"
+        [[profile.page.key]]
+        index = 0
+        press = { keys = { combo = "ctrl+shift+t", hold = 250 } }
+        [[profile.page.key]]
+        index = 1
+        press = { profile = "next" }
+        [[profile.page.key]]
+        index = 2
+        press = { pin = "toggle" }
+        fit = "fill"
+        label_over_image = true
+        widget = { kind = "cpu_usage", refresh = 2 }
+        [[profile.page.key]]
+        index = 3
+        press = { setup = "Play" }
+        widget = { kind = "clock", format = "%H", refresh = 1 }
+        [profile.dial]
+        long_press = { profile = "pick" }
+
+        [[profile]]
+        name = "Blender"
+        apps = ["blender"]
+        base = "Desktop"
+
+        [[profile]]
+        name = "Claude"
+        apps = ["*claude*"]
+
+        [[profile]]
+        name = "Live"
+        base = "Blender"
+    "##;
+
+    #[test]
+    fn setups_and_new_shapes_roundtrip() {
+        let cfg = Config::parse(SETUPS, Path::new("/x")).unwrap();
+        assert_eq!(cfg.setups.len(), 3);
+        assert_eq!(cfg.setups[1].mode(), SetupMode::Manual);
+        assert_eq!(cfg.setups[2].release, Some(ReleasePolicy::Timeout));
+        assert_eq!(cfg.effective_setups(), cfg.setups);
+        assert_eq!(cfg.app.theme.as_deref(), Some("system"));
+        assert!(cfg.app.other.contains_key("future_setting"));
+        assert!(!cfg.status.blink_on_setup);
+        assert_eq!(cfg.pinned[0].except_setups, ["Stream"]);
+        let keys = &cfg.profiles[0].pages[0].keys;
+        let hold = KeysAction::Hold(KeysHold { combo: "ctrl+shift+t".into(), hold: Some(250) });
+        assert_eq!(keys[0].press, Some(Action::Keys(hold.clone())));
+        assert_eq!(hold.combo(), "ctrl+shift+t@250");
+        assert_eq!(keys[2].press, Some(Action::Pin(PinAction::Toggle)));
+        assert_eq!(keys[2].face.fit, Some(ImageFit::Fill));
+        let w = keys[2].face.widget.as_ref().unwrap();
+        assert_eq!((&w.widget, w.refresh), (&Widget::CpuUsage, Some(2)));
+        assert_eq!(cfg.profiles[0].dial.as_ref().unwrap().long_press, Some(Action::Profile("pick".into())));
+        assert_eq!(cfg.profiles[1].base.as_deref(), Some("Desktop"));
+
+        let toml = cfg.to_toml().unwrap();
+        assert_eq!(Config::parse(&toml, Path::new("/x")).unwrap(), cfg, "{toml}");
+        for key in ["[[setup]]", "[app]", "future_setting", "[app.feedback]", "blink_on_setup = false", "except_setups", "hold = 250"] {
+            assert!(toml.contains(key), "{key} missing in\n{toml}");
+        }
+        // Unset setup fields stay unset.
+        assert!(!toml.contains("show_on_dial = false") && !toml.contains("mode = \"follow\"\nprofiles = [\"Blender\"]"));
+
+        // The app's JSON shapes (app/src/lib/types.ts).
+        let json = serde_json::to_value(&cfg).unwrap();
+        assert_eq!(json["setup"][0]["name"], "Work");
+        assert_eq!(json["profile"][0]["page"][0]["key"][0]["press"], serde_json::json!({"keys": {"combo": "ctrl+shift+t", "hold": 250}}));
+        assert_eq!(json["profile"][0]["page"][0]["key"][2]["widget"], serde_json::json!({"kind": "cpu_usage", "refresh": 2}));
+        assert_eq!(json["profile"][0]["page"][0]["key"][2]["press"], serde_json::json!({"pin": "toggle"}));
+        assert_eq!(json["app"]["feedback"]["toast"], true);
+        assert_eq!(serde_json::from_value::<Config>(json).unwrap(), cfg);
+    }
+
+    #[test]
+    fn rejects_bad_setups() {
+        let with = |find: &str, replace: &str| {
+            assert!(SETUPS.contains(find), "{find}");
+            Config::parse(&SETUPS.replacen(find, replace, 1), Path::new("/x"))
+        };
+        assert!(with("name = \"Stream\"", "name = \"Work\"").is_err(), "duplicate setup");
+        assert!(with("profiles = [\"Blender\", \"Claude\"]", "profiles = [\"Blender\", \"Nope\"]").is_err());
+        assert!(with("profiles = [\"Blender\", \"Claude\"]", "profiles = [\"Blender\", \"Blender\"]").is_err());
+        assert!(with("profiles = [\"Blender\", \"Claude\"]", "profiles = [\"Desktop\"]").is_err(), "fallback in list");
+        assert!(with("fallback = \"Desktop\"", "fallback = \"Nope\"").is_err());
+        assert!(with("release_after = 10", "release_after = 0").is_err());
+        assert!(with("release = \"timeout\"", "release = \"later\"").is_err());
+        assert!(with("mode = \"hybrid\"", "mode = \"auto\"").is_err());
+        assert!(with("except_setups = [\"Stream\"]", "except_setups = [\"Nope\"]").is_err());
+        assert!(with("base = \"Desktop\"", "base = \"Nope\"").is_err());
+        assert!(with("base = \"Desktop\"", "base = \"Live\"").is_err(), "cycle");
+        assert!(with("base = \"Desktop\"", "base = \"Blender\"").is_err(), "own base");
+        assert!(with("press = { setup = \"Play\" }", "press = { setup = \"Nope\" }").is_err());
+        assert!(with("press = { profile = \"next\" }", "press = { profile = \"later\" }").is_err());
+        assert!(with("press = { pin = \"toggle\" }", "press = { pin = \"hold\" }").is_err());
+        assert!(with("refresh = 2", "refresh = 0").is_err());
+        assert!(with("hold = 250", "hold = 250, tap = 1").is_err());
+        assert!(with("wrap = true", "wrapp = true").is_err(), "unknown setup key");
+        assert!(with("toast = true", "toast = 1").is_err());
+    }
+
+    /// Without `[[setup]]` the implicit setup picks exactly what `profile_for_app` picks.
+    #[test]
+    fn implicit_setup_matches_legacy() {
+        let cfg = Config::parse(include_str!("../../../examples/config.toml"), Path::new("/x")).unwrap();
+        let setups = cfg.effective_setups();
+        assert_eq!(setups.len(), 1);
+        let s = &setups[0];
+        assert_eq!((s.name.as_str(), s.mode()), (IMPLICIT_SETUP, SetupMode::Follow));
+        assert_eq!(s.fallback.as_ref(), Some(&cfg.profiles[0].name));
+        let names: Vec<&String> = cfg.profiles.iter().skip(1).map(|p| &p.name).collect();
+        assert_eq!(s.profiles.iter().collect::<Vec<_>>(), names);
+        let pick = |class: &str| {
+            s.profiles
+                .iter()
+                .find(|n| cfg.profiles.iter().any(|p| &p.name == *n && p.apps.iter().any(|a| glob_match(a, class))))
+                .or(s.fallback.as_ref())
+                .and_then(|n| cfg.profiles.iter().position(|p| &p.name == n))
+                .unwrap()
+        };
+        let classes = cfg.profiles.iter().flat_map(|p| &p.apps).map(|a| a.replace('*', "x")).chain(["kitty".to_owned(), String::new()]);
+        for class in classes {
+            assert_eq!(pick(&class), cfg.profile_for_app(&class), "{class}");
+        }
+        assert_eq!(Config::default().effective_setups()[0].fallback, None);
+        // An implicit setup's name works in setup actions and except_setups.
+        assert!(Config::parse("[[pinned]]\nindex=0\npress={setup='Default'}\nexcept_setups=['Default']\n", Path::new("/")).is_ok());
     }
 }

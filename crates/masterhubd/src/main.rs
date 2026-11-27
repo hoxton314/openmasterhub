@@ -99,8 +99,14 @@ fn main() -> Result<()> {
         log::warn!("{} not found, starting with an empty config", path.display());
         (Config::default(), String::new())
     };
-    for action in config.profiles.iter().flat_map(|p| p.actions()) {
+    let pinned = config.pinned.iter().flat_map(|p| [&p.key.press, &p.key.release]).flatten();
+    for action in config.profiles.iter().flat_map(|p| p.actions()).chain(pinned) {
         actions::validate(action)?;
+    }
+    for setup in &config.setups {
+        for shortcut in setup.shortcuts() {
+            keyboard::validate(shortcut).with_context(|| format!("setup {:?}: shortcut {shortcut:?}", setup.name))?;
+        }
     }
     if check {
         println!("{}: ok", path.display());

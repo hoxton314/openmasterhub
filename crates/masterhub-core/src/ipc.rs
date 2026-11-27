@@ -26,6 +26,17 @@
 //! | `run_action` | `action` (as in the config, e.g. `{"keys":"ctrl+c"}`), `value`? | run it now |
 //! | `frame` | `claim`, `target`, `jpeg` (base64) | show an image on a claimed key (0..=14) or the dial (255) |
 //! | `led` | `claim`, `zone`, `mode`, `color`, `brightness` | set a claimed LED |
+//! | `get_capabilities` | | what this service implements beyond 0.8, `Vec<String>` (see [`capability`]) |
+//! | `set_setup` | `name` | make a setup active (capability `setups`) |
+//! | `pin` | `profile`? | hybrid setups: pin a profile, default the live one (capability `pin`) |
+//! | `release_pin` | | end the pin (capability `pin`) |
+//! | `identify` | `serial` | flash a module so the user can find it (capability `identify`) |
+//! | `preview_profile` | `name`, `secs` | show a profile on the hub for a while (capability `preview_profile`) |
+//! | `release_claim` | `claim` | end another client's claim (capability `release_claim`) |
+//! | `get_system_info` | | [`SystemInfo`] (capability `system_info`) |
+//!
+//! Services without a capability answer its requests with an error; services older than
+//! `get_capabilities` answer that with an error too, which clients treat as an empty list.
 //!
 //! Events: `input`, `state`, `modules`, `display`, `config_changed`, `claim`, `sessions`.
 //!
@@ -68,6 +79,9 @@ pub struct ModuleState {
     pub socket: Option<String>,
     pub placement: Option<Placement>,
     pub firmware: Option<String>,
+    /// The module ignores software mode until it is unplugged and plugged in again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub needs_replug: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -83,6 +97,79 @@ pub struct HubState {
     pub rotation: u16,
     /// Focused application (window class or exe name), if known.
     pub active_app: Option<String>,
+    /// The active setup (services with capability `setups`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<String>,
+    /// Why the live profile is live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<Reason>,
+    /// Hybrid setups: the pinned profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<PinState>,
+}
+
+/// Why the live profile is live.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Reason {
+    /// Pattern `pattern` of the profile at `index` (0-based) in the setup's list matched the
+    /// focused app.
+    Rule { pattern: String, index: usize },
+    /// No rule matched.
+    Fallback,
+    /// Chosen by the user (manual setups, `set_profile`).
+    Manual,
+    /// Pinned (hybrid setups).
+    Pin,
+    /// A `profile` action.
+    Action,
+}
+
+/// A hybrid setup's pin.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PinState {
+    pub profile: String,
+    /// Unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<u64>,
+}
+
+/// Names reported by `get_capabilities`: behaviour beyond the 0.8 baseline. Clients hide or
+/// disable controls whose capability is missing; unknown names are ignored.
+pub mod capability {
+    pub const SETUPS: &str = "setups";
+    pub const BASE: &str = "base";
+    /// `keys = { combo, hold }`.
+    pub const HOLD: &str = "hold";
+    pub const LONG_PRESS: &str = "long_press";
+    pub const SETUP_ACTION: &str = "setup_action";
+    /// `profile = "next" | "prev" | "pick"`.
+    pub const PROFILE_CYCLE: &str = "profile_cycle";
+    pub const PIN: &str = "pin";
+    pub const EXCEPT_SETUPS: &str = "except_setups";
+    pub const BLINK_ON_SETUP: &str = "blink_on_setup";
+    pub const KNOB_VOLUME: &str = "knob_volume";
+    pub const FACE_FIT: &str = "face_fit";
+    pub const WIDGET_REFRESH: &str = "widget_refresh";
+    pub const IDENTIFY: &str = "identify";
+    pub const NEEDS_REPLUG: &str = "needs_replug";
+    pub const SYSTEM_INFO: &str = "system_info";
+    pub const PREVIEW_PROFILE: &str = "preview_profile";
+    pub const RELEASE_CLAIM: &str = "release_claim";
+    /// `priority`, `apps`, `pid` and `program` in [`super::ClaimState`].
+    pub const CLAIM_DETAILS: &str = "claim_details";
+}
+
+/// `get_system_info`: what the service runs on.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SystemInfo {
+    /// `linux`, `windows`, `macos`.
+    pub platform: String,
+    /// How the focused window is found, e.g. `hyprland`, `kwin`, `x11`, `win32`; none if unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus_backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -152,6 +239,17 @@ pub struct ClaimState {
     pub key_turn: u16,
     /// Same for the dial.
     pub dial_turn: u16,
+    /// Claim priority (capability `claim_details`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i32>,
+    /// The window class globs it is active for; empty: always.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<String>,
+    /// Process of the claiming client, if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<String>,
 }
 
 /// A rendered display: JPEG as base64.
@@ -243,6 +341,20 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         brightness: Option<u8>,
     },
+    /// `Vec<String>` of [`capability`] names.
+    GetCapabilities,
+    SetSetup { name: String },
+    /// Pin `profile`, or the live profile when `None`.
+    Pin {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        profile: Option<String>,
+    },
+    ReleasePin,
+    Identify { serial: String },
+    PreviewProfile { name: String, secs: u32 },
+    /// End any client's claim (admin; the claim list in the app).
+    ReleaseClaim { claim: u64 },
+    GetSystemInfo,
 }
 
 /// Suggestions for the targets of volume and mute actions.
@@ -375,6 +487,8 @@ pub fn call_once(request: Request) -> Result<serde_json::Value> {
 
 /// What the client reports to the app.
 #[derive(Debug, Clone)]
+// One at a time through a channel; boxing would only complicate matching on it.
+#[allow(clippy::large_enum_variant)]
 pub enum ClientEvent {
     /// Connected to (true) or lost (false) the service.
     Online(bool),
@@ -484,6 +598,13 @@ impl Client {
     pub fn audio(&self) -> Result<AudioInfo> {
         self.get(Request::GetAudio)
     }
+    /// What the service implements; empty for services that predate the request.
+    pub fn capabilities(&self) -> Vec<String> {
+        self.get(Request::GetCapabilities).unwrap_or_default()
+    }
+    pub fn set_setup(&self, name: &str) -> Result<()> {
+        self.call(Request::SetSetup { name: name.to_owned() }).map(|_| ())
+    }
 }
 
 #[cfg(test)]
@@ -530,5 +651,39 @@ mod tests {
         assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"type":"event","event":"config_changed"}"#);
         let resp = ServerMsg::Response(Response { id: 3, result: Some(serde_json::json!("x")), error: None });
         assert_eq!(serde_json::to_string(&resp).unwrap(), r#"{"type":"response","id":3,"result":"x"}"#);
+    }
+
+    #[test]
+    fn new_fields_are_optional() {
+        // An old service's state and modules parse, and new fields stay off the wire when unset.
+        let old = r#"{"profile":"A","page":"Main","in_folder":false,"horizontal":true,"rotation":90,"active_app":null}"#;
+        let s: HubState = serde_json::from_str(old).unwrap();
+        assert_eq!(s.setup, None);
+        assert_eq!(serde_json::to_string(&s).unwrap(), old);
+        let m: ModuleState = serde_json::from_str(r#"{"kind":"dial","serial":"x","socket":null,"placement":null,"firmware":null}"#).unwrap();
+        assert!(!m.needs_replug);
+        assert!(!serde_json::to_string(&m).unwrap().contains("needs_replug"));
+        let c = ClaimState { claim: 1, name: "x".into(), active: true, owns: Controls::default(), key_turn: 0, dial_turn: 0, priority: None, apps: vec![], pid: None, program: None };
+        assert_eq!(serde_json::to_string(&c).unwrap(), r#"{"claim":1,"name":"x","active":true,"owns":{},"key_turn":0,"dial_turn":0}"#);
+    }
+
+    #[test]
+    fn reasons_and_new_requests() {
+        let s = HubState {
+            setup: Some("Work".into()),
+            reason: Some(Reason::Rule { pattern: "blender".into(), index: 0 }),
+            pinned: Some(PinState { profile: "Blender".into(), since: Some(5) }),
+            ..Default::default()
+        };
+        let v = serde_json::to_value(&s).unwrap();
+        assert_eq!(v["reason"], serde_json::json!({"kind":"rule","pattern":"blender","index":0}));
+        assert_eq!(v["pinned"], serde_json::json!({"profile":"Blender","since":5}));
+        assert_eq!(serde_json::to_value(Reason::Fallback).unwrap(), serde_json::json!({"kind":"fallback"}));
+        let r = RequestMsg { id: 1, request: Request::GetCapabilities };
+        assert_eq!(serde_json::to_string(&r).unwrap(), r#"{"id":1,"method":"get_capabilities"}"#);
+        let r: RequestMsg = serde_json::from_str(r#"{"id":2,"method":"pin","params":{}}"#).unwrap();
+        assert_eq!(r.request, Request::Pin { profile: None });
+        let r: RequestMsg = serde_json::from_str(r#"{"id":2,"method":"set_setup","params":{"name":"Play"}}"#).unwrap();
+        assert_eq!(r.request, Request::SetSetup { name: "Play".into() });
     }
 }
