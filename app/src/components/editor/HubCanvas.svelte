@@ -9,8 +9,7 @@
   import { tick } from 'svelte';
   import { currentPage, currentProfile, displayKey, editor, flashKey, hub, isEditingLive, ledColor } from '../../lib/hub.svelte';
   import {
-    BASE_MARGIN, DIAL_PX, FOOTPRINT, GRID_COLS, GRID_ROWS, KEY_PX, KNOB_PX, ROLLER_PX, U, boundsPx, cssMatrix, faderBox, keyBox, placementMatrix,
-    translate, then, viewMatrix, type Box, type Matrix,
+    DIAL_PX, FOOTPRINT, KNOB_PX, ROLLER_PX, U, boundsPx, cssMatrix, faderBox, keyBox, layoutModules, type Box,
   } from '../../lib/geometry';
   import { controlIn, ownerOf, profileByName, type ControlRef, type Owner } from '../../lib/model';
   import { previewOf } from '../../lib/previews.svelte';
@@ -24,13 +23,6 @@
 
   type Cfg = Face & { cw?: Action; ccw?: Action; press?: Action; away?: Action; toward?: Action; change?: Action };
 
-  interface Placed {
-    m: ModuleState;
-    matrix: Matrix;
-    unknown: boolean;
-    /** Px bounds of the module in the world. */
-    bounds: Box;
-  }
   interface Ctl {
     id: string;
     ref: ControlRef;
@@ -51,39 +43,7 @@
   const ctx = $derived({ profile: profile?.name ?? '', page: pageName, setup: editor.setup || undefined, claims: live ? hub.claims : [] });
 
   // ─── layout: where every module sits ───
-  const layout = $derived.by(() => {
-    const view = viewMatrix(hub.state.rotation ?? 90);
-    const mods = [...hub.modules].sort((a, b) => Number(a.kind !== 'base') - Number(b.kind !== 'base'));
-    const placed: Placed[] = [];
-    const tray: ModuleState[] = [];
-    const fp = (k: ModuleKind): Box => [0, 0, FOOTPRINT[k][0] * U, FOOTPRINT[k][1] * U];
-    for (const m of mods) {
-      const p = m.placement ?? (m.kind === 'base' ? { col: 0, row: 0, cols: GRID_COLS, rows: GRID_ROWS, rotation: 0 } : undefined);
-      if (p) {
-        const matrix = then(placementMatrix(p, m.kind), view);
-        placed.push({ m, matrix, unknown: false, bounds: boundsPx(matrix, fp(m.kind)) });
-      } else tray.push(m);
-    }
-    let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
-    const grow = ([x, y, w, h]: Box, extra = 0) => {
-      x0 = Math.min(x0, x - extra);
-      y0 = Math.min(y0, y - extra);
-      x1 = Math.max(x1, x + w + extra);
-      y1 = Math.max(y1, y + h + extra);
-    };
-    for (const p of placed) grow(p.bounds, p.m.kind === 'base' ? BASE_MARGIN : 0);
-    if (!isFinite(x0)) grow(boundsPx(view, [0, 0, GRID_COLS * U, GRID_ROWS * U]), BASE_MARGIN);
-    let tx = x0 / U;
-    const ty = y1 / U + 0.5;
-    for (const m of tray) {
-      const matrix = translate(tx, ty);
-      const placedTray = { m, matrix, unknown: true, bounds: boundsPx(matrix, fp(m.kind)) };
-      grow(placedTray.bounds);
-      tx += FOOTPRINT[m.kind][0] + 0.3;
-      placed.push(placedTray);
-    }
-    return { placed, w: x1 - x0 + 2 * PAD, h: y1 - y0 + 2 * PAD + (tray.length ? 20 : 0), ox: PAD - x0, oy: PAD - y0 + (tray.length ? 20 : 0) };
-  });
+  const layout = $derived(layoutModules(hub.modules, hub.state.rotation ?? 90, PAD));
 
   const controls = $derived.by(() => {
     const out: Ctl[] = [];

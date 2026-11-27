@@ -6,7 +6,7 @@
   import { invoke } from '../../lib/backend';
   import { edit, hasCapability, hub, setSetup, toast } from '../../lib/hub.svelte';
   import { effectiveSetups, profileByName } from '../../lib/model';
-  import type { ModuleKind, Profile } from '../../lib/types';
+  import type { ModuleKind } from '../../lib/types';
   import { ui } from '../../lib/ui.svelte';
   import { saveApp } from '../settings/actions';
   import Button from '../ui/Button.svelte';
@@ -16,6 +16,7 @@
   import ProgressSteps from '../ui/ProgressSteps.svelte';
   import TemplateCard from '../ui/TemplateCard.svelte';
   import TemplatePreview from '../profiles/TemplatePreview.svelte';
+  import HubLayout from '../editor/HubLayout.svelte';
   import { apply, build, STARTINGS, type StartingId } from './starting';
   import './trigger.svelte';
 
@@ -51,19 +52,18 @@
   });
 
   const KINDS: Record<ModuleKind, string> = { base: 'Base', keypad: 'Keypad', dial: 'Dial', knob: 'Knobs', roller: 'Rollers', fader: 'Faders' };
-  const where = (m: (typeof hub.modules)[number]) => (m.placement ? `col ${m.placement.col + 1}, row ${m.placement.row + 1}${m.placement.rotation ? `, ${m.placement.rotation}°` : ''}` : 'not placed');
+  const where = (m: (typeof hub.modules)[number]) => {
+    if (m.kind === 'base') return 'the hub itself';
+    if (!m.placement) return 'not placed';
+    const turn = m.placement.rotation ? ` · rotated ${m.placement.rotation}°` : '';
+    return `col ${m.placement.col + 1}, row ${m.placement.row + 1}${turn}`;
+  };
+  /** The module row being hovered or focused, ringed in the drawing. */
+  let hot = $state<string | undefined>();
+  const anyPlaced = $derived(hub.modules.some((m) => m.kind !== 'base' && m.placement));
   const hasWarnings = $derived(checks.some((c) => c.status === 'warning' || c.status === 'danger'));
   const found = $derived(build('work', openClasses).profiles.filter((p) => p.apps?.length).map((p) => p.name));
 
-  /** The hub drawn on the modules step: the modules found, no keys yet. */
-  const found_modules = $derived<Profile>({
-    name: '',
-    page: [{ name: 'Main', key: [] }],
-    ...(hub.modules.some((m) => m.kind === 'dial') ? { dial: {} } : {}),
-    ...(hub.modules.some((m) => m.kind === 'knob') ? { knob: [{ index: 0 }] } : {}),
-    ...(hub.modules.some((m) => m.kind === 'fader') ? { fader: [{ index: 0 }] } : {}),
-    ...(hub.modules.some((m) => m.kind === 'roller') ? { roller: [{ side: 'left' as const }] } : {}),
-  });
   /** The first profile of what was just created, for the last step. */
   const createdProfile = $derived.by(() => {
     const s = created ? effectiveSetups(hub.config).find((x) => x.name === created) : undefined;
@@ -134,10 +134,11 @@
         {hub.modules.length ? 'The service reports these modules. You can move them in the editor, and the drawing follows.' : 'Plug the MasterHUB in and the modules appear here. You can also continue and connect it later.'}
       </p>
       <div class="split">
-        {#if hub.modules.length}<div class="hubview" aria-hidden="true"><TemplatePreview profile={found_modules} unit={30} /></div>{/if}
+        {#if anyPlaced}<div class="hubview" aria-hidden="true"><HubLayout width={250} height={250} highlight={hot} /></div>{/if}
         <div class="modules">
           {#each hub.modules as m (m.serial)}
-            <div class="module">
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <div class="module" class:hot={hot === m.serial} tabindex="0" role="group" aria-label="{KINDS[m.kind] ?? m.kind}, {where(m)}" onmouseenter={() => (hot = m.serial)} onmouseleave={() => (hot = undefined)} onfocus={() => (hot = m.serial)} onblur={() => (hot = undefined)}>
               <Check size={14} />
               <b>{KINDS[m.kind] ?? m.kind}</b>
               <span class="t-small muted">{where(m)}</span>
@@ -302,6 +303,9 @@
     background: var(--color-sunken);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-row);
+  }
+  .module.hot {
+    border-color: var(--color-accent);
   }
   .module b {
     min-width: 72px;

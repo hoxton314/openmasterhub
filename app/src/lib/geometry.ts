@@ -1,7 +1,7 @@
 // Hub drawing geometry, in cells. Each module is drawn in its natural orientation; an SVG
 // transform places it on the Base (vertical frame) and rotates the Base to the user's view.
 
-import type { ModuleKind, Placement } from './types';
+import type { ModuleKind, ModuleState, Placement } from './types';
 
 export const GRID_COLS = 4;
 export const GRID_ROWS = 6;
@@ -139,4 +139,54 @@ export function boundsPx(m: Matrix, [x, y, w, h]: Box): Box {
   const xs = pts.map((p) => p[0]);
   const ys = pts.map((p) => p[1]);
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+}
+
+export interface PlacedModule {
+  m: ModuleState;
+  matrix: Matrix;
+  /** In the tray below the hub: the service did not report where it sits. */
+  unknown: boolean;
+  /** Px bounds of the module in the world. */
+  bounds: Box;
+}
+
+/**
+ * Where every module sits on the canvas, shared by the editor and the read-only drawings so they
+ * agree: the Base first, placed modules by socket and rotation, unplaced ones in a tray below.
+ * `w`/`h` are the stage size in px including `pad`; `ox`/`oy` move the world into it.
+ */
+export function layoutModules(modules: ModuleState[], rotation: number, pad: number, tray = true) {
+  const view = viewMatrix(rotation);
+  const mods = [...modules].sort((a, b) => Number(a.kind !== 'base') - Number(b.kind !== 'base'));
+  const placed: PlacedModule[] = [];
+  const unplaced: ModuleState[] = [];
+  const fp = (k: ModuleKind): Box => [0, 0, FOOTPRINT[k][0] * U, FOOTPRINT[k][1] * U];
+  for (const m of mods) {
+    const p = m.placement ?? (m.kind === 'base' ? { col: 0, row: 0, cols: GRID_COLS, rows: GRID_ROWS, rotation: 0 } : undefined);
+    if (p) {
+      const matrix = then(placementMatrix(p, m.kind), view);
+      placed.push({ m, matrix, unknown: false, bounds: boundsPx(matrix, fp(m.kind)) });
+    } else unplaced.push(m);
+  }
+  const rest = tray ? unplaced : [];
+  let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+  const grow = ([x, y, w, h]: Box, extra = 0) => {
+    x0 = Math.min(x0, x - extra);
+    y0 = Math.min(y0, y - extra);
+    x1 = Math.max(x1, x + w + extra);
+    y1 = Math.max(y1, y + h + extra);
+  };
+  for (const p of placed) grow(p.bounds, p.m.kind === 'base' ? BASE_MARGIN : 0);
+  if (!isFinite(x0)) grow(boundsPx(view, [0, 0, GRID_COLS * U, GRID_ROWS * U]), BASE_MARGIN);
+  let tx = x0 / U;
+  const ty = y1 / U + 0.5;
+  for (const m of rest) {
+    const matrix = translate(tx, ty);
+    const t = { m, matrix, unknown: true, bounds: boundsPx(matrix, fp(m.kind)) };
+    grow(t.bounds);
+    tx += FOOTPRINT[m.kind][0] + 0.3;
+    placed.push(t);
+  }
+  const label = rest.length ? 20 : 0;
+  return { placed, w: x1 - x0 + 2 * pad, h: y1 - y0 + 2 * pad + label, ox: pad - x0, oy: pad - y0 + label };
 }
