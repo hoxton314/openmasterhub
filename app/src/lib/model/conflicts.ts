@@ -144,7 +144,7 @@ export function conflictText(x: RuleConflict): { head: string; witness: string; 
 export function fixLabel(f: ConflictFix): string {
   if (f.kind === 'move') return `Move ${f.profile} above ${f.before}`;
   if (f.kind === 'narrow') return `Narrow ${f.profile}’s rule`;
-  return `Remove ${f.pattern} from ${f.profile}`;
+  return 'Remove this pattern';
 }
 
 /**
