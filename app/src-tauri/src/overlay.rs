@@ -2,7 +2,8 @@
 //! or setup just became live. It never takes focus, is skipped while a fullscreen window has
 //! the foreground (unless `[app.feedback] in_fullscreen = true`) and is drawn by the same UI
 //! and theme engine as the app (`overlay.html`). By default it only shows switches the user
-//! made, not follow-mode changes caused by the focused window (`[app] overlay`).
+//! made, not follow-mode changes caused by the focused window (`[app] overlay`). It is opt-in:
+//! nothing shows unless `[app.feedback] toast = true`.
 //!
 //! The window is exactly as big as the toast: the page measures its card and reports it with
 //! `overlay_fit`, which sizes, places and shows the window. On Wayland a normal window cannot
@@ -161,7 +162,7 @@ pub fn on_change(app: &AppHandle, prev: Option<&HubState>, new: &HubState) {
     let state = app.state::<AppState>();
     let (toast, in_fullscreen) = {
         let live = state.live.lock().unwrap();
-        if live.feedback(|f| f.toast) == Some(false) || !wanted(live.overlay_mode(), prev, new, setup_changed) {
+        if live.feedback(|f| f.toast) != Some(true) || !wanted(live.overlay_mode(), prev, new, setup_changed) {
             log::debug!("switch overlay: not wanted ({:?})", new.reason);
             return;
         }

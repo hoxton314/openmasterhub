@@ -119,7 +119,7 @@ impl AppSettings {
 /// `[app.feedback]`: what the app shows on a switch.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Feedback {
-    /// A toast near the tray.
+    /// A toast near the tray (off unless `true`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub toast: Option<bool>,
     /// A card on the dial.

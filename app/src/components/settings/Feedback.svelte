@@ -11,26 +11,25 @@
 
   const fb = $derived(hub.config.app?.feedback ?? {});
   const on = (v: boolean | undefined) => v !== false;
-  const overlay = $derived(hub.config.app?.overlay === 'all' || hub.config.app?.overlay === 'off' ? hub.config.app.overlay : 'switches');
+  const overlay = $derived(hub.config.app?.overlay === 'all' ? 'all' : 'switches');
   const set = (patch: Partial<NonNullable<typeof fb>>) => saveApp({ feedback: { ...fb, ...patch } }, 'feedback change');
 </script>
 
-<Page title="Feedback" about="What you see when the profile or setup changes. A small toast near the tray, never stealing focus.">
+<Page title="Feedback" about="What you see when the profile or setup changes. The toast near the tray is opt-in and never steals focus.">
   <section>
     <SectionLabel as="h3">When the profile or setup switches</SectionLabel>
-    <Row label="Toast" help="Shown for 1.5 s; setup changes carry an Undo for 5 s">
-      <Toggle title="Toast" checked={on(fb.toast)} onchange={(v) => set({ toast: v })} />
+    <Row label="Toast" help="Off by default. Shown for 1.5 s; setup changes carry an Undo for 5 s">
+      <Toggle title="Toast" checked={fb.toast === true} onchange={(v) => set({ toast: v })} />
     </Row>
     <Row label="Toast for" help="Profiles that follow the focused window change all the time, so by default only your own switches show">
       <Segmented
         label="Toast for"
         value={overlay}
-        disabled={!on(fb.toast)}
+        disabled={fb.toast !== true}
         onchange={(v) => saveApp({ overlay: v }, 'toast change')}
         options={[
           { value: 'switches', label: 'My switches' },
           { value: 'all', label: 'Every change' },
-          { value: 'off', label: 'Off' },
         ]} />
     </Row>
     <Row label="Card on the dial" help="The dial draws the matching card">

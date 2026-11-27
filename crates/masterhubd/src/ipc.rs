@@ -155,6 +155,31 @@ fn json<T: Serialize>(v: T) -> Result<serde_json::Value> {
     Ok(serde_json::to_value(v)?)
 }
 
+/// Pins need a hybrid setup.
+fn check_hybrid(snap: &Snapshot) -> Result<()> {
+    let active = snap.state.setup.as_deref().and_then(|n| snap.config.effective_setups().into_iter().find(|s| s.name == n));
+    match active {
+        Some(s) if s.mode() == masterhub_core::config::SetupMode::Hybrid => Ok(()),
+        Some(s) => bail!("setup {:?} is not hybrid; only hybrid setups pin profiles", s.name),
+        None => bail!("no setup is active; only hybrid setups pin profiles"),
+    }
+}
+
+/// Refuse an action from a client (`masterhubd ctl`, the app) that would do nothing, so the
+/// caller hears why instead of only the service log.
+fn check_action(snap: &Snapshot, action: &masterhub_core::config::Action) -> Result<()> {
+    use masterhub_core::config::{Action, PinAction};
+    let step = |name: &str| matches!(name, "next" | "prev" | "pick");
+    match action {
+        Action::Pin(PinAction::Toggle) if snap.state.pinned.is_none() => check_hybrid(snap),
+        Action::Pin(PinAction::Release) if snap.state.pinned.is_none() => bail!("nothing is pinned"),
+        Action::Setup(name) if !step(name) && !snap.config.effective_setups().iter().any(|s| s.name == *name) => bail!("no setup {name:?}"),
+        // An exact profile name wins over next/prev/pick.
+        Action::Profile(name) if snap.config.profile(name).is_none() && !step(name) => bail!("no profile {name:?}"),
+        _ => Ok(()),
+    }
+}
+
 fn handle(
     request: Request,
     controller: &Sender<Msg>,
@@ -232,6 +257,7 @@ fn handle(
             json(serde_json::json!({ "claim": claim }))
         }
         Request::RunAction { action, value } => {
+            check_action(&snapshot.lock().unwrap(), &action)?;
             controller.send(Msg::RunAction { action, value })?;
             json(())
         }
@@ -284,10 +310,7 @@ fn handle(
                 {
                     bail!("no profile {p:?}");
                 }
-                let active = snap.state.setup.as_deref().and_then(|n| snap.config.effective_setups().into_iter().find(|s| s.name == n));
-                if active.is_none_or(|s| s.mode() != masterhub_core::config::SetupMode::Hybrid) {
-                    bail!("the active setup is not hybrid; only hybrid setups pin profiles");
-                }
+                check_hybrid(&snap)?;
             }
             controller.send(Msg::Pin(profile))?;
             json(())
@@ -349,5 +372,35 @@ mod tests {
             capability::CLAIM_DETAILS, capability::WINDOW_TITLES, capability::PAUSE,
         ];
         assert!(CAPABILITIES.iter().all(|c| known.contains(c)));
+    }
+
+    #[test]
+    fn actions_that_would_do_nothing_are_refused() {
+        use masterhub_core::config::{Action, PinAction};
+        let config = Config::parse(
+            "[[profile]]\nname = \"Desktop\"\n[[setup]]\nname = \"Play\"\nfallback = \"Desktop\"\n[[setup]]\nname = \"Work\"\nmode = \"hybrid\"\nfallback = \"Desktop\"\n",
+            std::path::Path::new("."),
+        )
+        .unwrap();
+        let snap = |setup: &str| Snapshot {
+            config: config.clone(),
+            config_text: String::new(),
+            config_path: Default::default(),
+            modules: Vec::new(),
+            state: masterhub_core::ipc::HubState { profile: "Desktop".into(), setup: Some(setup.into()), ..Default::default() },
+            displays: Default::default(),
+            sessions: Vec::new(),
+            claims: Vec::new(),
+        };
+        let err = |s: &Snapshot, a: Action| check_action(s, &a).err().map(|e| e.to_string());
+        let play = snap("Play");
+        assert_eq!(err(&play, Action::Pin(PinAction::Toggle)).as_deref(), Some("setup \"Play\" is not hybrid; only hybrid setups pin profiles"));
+        assert_eq!(err(&play, Action::Pin(PinAction::Release)).as_deref(), Some("nothing is pinned"));
+        assert_eq!(err(&play, Action::Setup("Nope".into())).as_deref(), Some("no setup \"Nope\""));
+        assert_eq!(err(&play, Action::Profile("Nope".into())).as_deref(), Some("no profile \"Nope\""));
+        for ok in [Action::Setup("next".into()), Action::Setup("Work".into()), Action::Profile("pick".into()), Action::Profile("Desktop".into())] {
+            assert_eq!(err(&play, ok), None);
+        }
+        assert_eq!(err(&snap("Work"), Action::Pin(PinAction::Toggle)), None);
     }
 }
