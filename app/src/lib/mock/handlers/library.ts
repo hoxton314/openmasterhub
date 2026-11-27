@@ -1,14 +1,54 @@
 // Mock commands for WP5 · library and integrations (game modes). Commands here win over the
 // base ones in ../mock.ts.
 
-import type { GamePlan, GameStatus } from '../../types';
+import type { ClaimInfo, GamePlan, GameStatus } from '../../types';
 import type { MockHandlers } from '../mock';
 
+// URL switches for design work: `?states=cyberpunk:bridge_down,deadlock:error` forces a game's
+// state (bridge_down | error | running); `?hooks=missing` pretends no Claude hooks are installed.
+const q = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
+const forced = Object.fromEntries((q.get('states') ?? '').split(',').filter(Boolean).map((s) => s.split(':') as [string, string]));
+let hooksInstalled = q.get('hooks') !== 'missing';
+let claims: ClaimInfo[] = [
+  { claim: 7, name: 'Cyberpunk 2077 mode', active: true, owns: { keys: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], dial: true }, priority: 50, apps: ['steam_app_1091500'], pid: 4410, program: 'built-in' },
+  { claim: 8, name: 'obs-hub-bridge', active: true, owns: { keys: [0, 1, 2, 3], leds: ['base'] }, priority: 20, apps: [], pid: 9021, program: '~/bin/obs-hub' },
+  { claim: 9, name: 'my-script.py', active: false, owns: { knobs: [2] }, priority: 10, apps: [], pid: 9733, program: 'python3' },
+];
+if (q.get('claims') === 'none') claims = [];
+
+const sessions = [
+  { name: 'omh-ui', status: 'ready' },
+  { name: 'masterhubd', status: 'working' },
+  { name: 'docs', status: 'attention' },
+];
+
 export const handlers: MockHandlers = {
+  snapshot: (_a, { snapshot, emit }) => {
+    setTimeout(() => emit('hub:claims', claims), 300);
+    return snapshot;
+  },
+  release_claim: (args, { emit }) => {
+    claims = claims.filter((c) => c.claim !== args?.claim);
+    emit('hub:claims', claims);
+  },
+  claude_hooks_status: () => (hooksInstalled ? { installed: true, path: '~/.claude/settings.json', hooks: 11, last_event_secs: 12 } : { installed: false, path: '~/.claude/settings.json', hooks: 0, last_event_secs: null }),
+  claude_hooks_install: () => void (hooksInstalled = true),
+  claude_hooks_remove: () => void (hooksInstalled = false),
+  claude_sessions: () => (hooksInstalled ? sessions : []),
+  games_bridge: (args) => {
+    const f = forced[args?.game as string];
+    if (f === 'bridge_down') return 'disconnected';
+    if (f === 'error') return 'error';
+    return f === 'running' || args?.game === 'cyberpunk' ? 'connected' : null;
+  },
   games_list: () => mockGames,
-  games_plan: (args) => mockPlan(args?.game as string, args?.path as string | undefined),
+  games_plan: async (args) => {
+    await new Promise((r) => setTimeout(r, 700));
+    return mockPlan(args?.game as string, args?.path as string | undefined);
+  },
   games_setup: async (args) => {
     await new Promise((r) => setTimeout(r, 1200));
+    if (forced[args?.game as string] === 'error') throw new Error('Could not write init.lua: permission denied');
     const g = mockGames.find((x) => x.game === args?.game);
     if (g) Object.assign(g, { enabled: true, assets: true, path: (args?.path as string) || g.path });
     return 'done';
@@ -49,9 +89,9 @@ function mockPlan(game: string, path?: string): GamePlan {
   return plan;
 }
 
-// `?game=deadlock` opens that game's setup dialog, for design work on it.
+// `?game=deadlock` opens that game's setup plan, for design work on it.
 if (typeof window !== 'undefined') {
-  const open = new URLSearchParams(location.search).get('game');
+  const open = q.get('game');
   if (open)
     setTimeout(async () => {
       const m = await import('../../games.svelte');
