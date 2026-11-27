@@ -222,14 +222,20 @@ export function setUserThemes(files: UserThemeFile[]) {
   user = next;
   userLoaded = true;
   resolved.clear();
-  // Resolve each user theme now so broken inheritance or values are reported up front.
-  for (const [id, u] of [...user]) {
-    try {
-      resolve(id);
-    } catch (e) {
-      problems.push({ file: u.name, message: e instanceof Error ? e.message : String(e) });
-      user.delete(id);
-      resolved.clear();
+  // Resolve each user theme now so broken inheritance or values are reported up front. Dropping
+  // a theme can break one that inherits it (it resolved while its parent was still listed), so
+  // repeat until a pass drops nothing.
+  for (let dropped = true; dropped; ) {
+    dropped = false;
+    for (const [id, u] of [...user]) {
+      try {
+        resolve(id);
+      } catch (e) {
+        problems.push({ file: u.name, message: e instanceof Error ? e.message : String(e) });
+        user.delete(id);
+        resolved.clear();
+        dropped = true;
+      }
     }
   }
   theme.problems = problems;
