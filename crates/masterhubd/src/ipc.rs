@@ -142,6 +142,8 @@ pub const CAPABILITIES: &[&str] = &[
     capability::PREVIEW_PROFILE,
     capability::RELEASE_CLAIM,
     capability::CLAIM_DETAILS,
+    capability::WINDOW_TITLES,
+    capability::PAUSE,
 ];
 
 /// Live-surface claim ids, unique for the service's lifetime.
@@ -322,6 +324,11 @@ fn handle(
             version: Some(env!("CARGO_PKG_VERSION").to_owned()),
         }),
         Request::GetClaims => json(&snapshot.lock().unwrap().claims),
+        Request::GetOpenWindows => json(crate::focus::open_windows()?),
+        Request::Pause { paused } => {
+            controller.send(Msg::Pause(paused))?;
+            json(())
+        }
     }
 }
 
@@ -331,13 +338,14 @@ mod tests {
 
     #[test]
     fn capabilities_are_known_names() {
-        // Only names the app knows (`Capability` in app/src/lib/types.ts).
+        // Only names the app knows (`Capability` in app/src/lib/types.ts; `window_titles` and `pause`
+        // are used by the Tauri side only).
         let known = [
             capability::SETUPS, capability::BASE, capability::HOLD, capability::LONG_PRESS, capability::SETUP_ACTION,
             capability::PROFILE_CYCLE, capability::PIN, capability::EXCEPT_SETUPS, capability::BLINK_ON_SETUP,
             capability::KNOB_VOLUME, capability::FACE_FIT, capability::WIDGET_REFRESH, capability::IDENTIFY,
             capability::NEEDS_REPLUG, capability::SYSTEM_INFO, capability::PREVIEW_PROFILE, capability::RELEASE_CLAIM,
-            capability::CLAIM_DETAILS,
+            capability::CLAIM_DETAILS, capability::WINDOW_TITLES, capability::PAUSE,
         ];
         assert!(CAPABILITIES.iter().all(|c| known.contains(c)));
     }

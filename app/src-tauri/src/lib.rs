@@ -1,12 +1,19 @@
 //! OpenMasterHUB desktop app: a Tauri shell around the Svelte UI. The Rust side talks to the
 //! masterhubd service and forwards its live events to the UI.
 
+mod claude_hooks;
 mod files;
 mod games;
+mod live;
+mod overlay;
+mod shortcuts;
+mod system;
 mod themes;
+mod tray;
 
-use std::path::{Path, PathBuf};
+use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 
 use base64::Engine;
 use masterhub_core::config::{self, Config, Face, Widget};
@@ -21,6 +28,14 @@ struct AppState {
     renderer: Renderer,
     /// TOML last sent to the service, to recognise our own ConfigChanged echoes.
     last_sent: Mutex<Option<String>>,
+    /// What the tray, shortcuts and overlay show (see `live.rs`).
+    live: Mutex<live::Live>,
+    /// Registered global shortcuts by id.
+    bindings: Mutex<HashMap<u32, (String, shortcuts::Binding)>>,
+    shortcuts_ready: AtomicBool,
+    tray_ready: AtomicBool,
+    /// Bumped by every toast, so an old one's timer does not hide a newer toast.
+    overlay_generation: AtomicU64,
 }
 
 #[derive(Clone, Serialize)]
@@ -47,7 +62,7 @@ fn data_url(jpeg: &[u8]) -> String {
     format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpeg))
 }
 
-fn err(e: impl std::fmt::Display) -> String {
+pub(crate) fn err(e: impl std::fmt::Display) -> String {
     format!("{e:#}")
 }
 
@@ -66,13 +81,10 @@ fn snapshot(state: State<AppState>) -> Snapshot {
             capabilities: Vec::new(),
         };
     }
-    let path = c.config_path().ok();
-    let dir = path.as_deref().and_then(|p| Path::new(p).parent()).map(Path::to_owned).unwrap_or_else(|| PathBuf::from("."));
-    let config = c.config().ok().and_then(|text| Config::parse(&text, &dir).map_err(|e| log::warn!("config: {e:#}")).ok());
     Snapshot {
         online: true,
-        config,
-        config_path: path,
+        config: live::fetch_config(c),
+        config_path: c.config_path().ok(),
         modules: c.modules().unwrap_or_default(),
         state: c.state().ok(),
         displays: c
@@ -203,6 +215,7 @@ fn restart_service() -> Result<(), String> {
 fn stop_service() {
     #[cfg(windows)]
     {
+        *system::CHILD.lock().unwrap() = None;
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let _ = std::process::Command::new("taskkill")
@@ -215,7 +228,8 @@ fn stop_service() {
 
 /// Start masterhubd: through systemd on Linux, or the service bundled next to the app
 /// elsewhere (detached, so it keeps running when the app closes).
-fn launch_service() -> anyhow::Result<()> {
+pub(crate) fn launch_service() -> anyhow::Result<()> {
+    system::note_launched();
     #[cfg(target_os = "linux")]
     {
         // Restart rather than start: the unit can be active yet unreachable, e.g. the old
@@ -239,7 +253,8 @@ fn launch_service() -> anyhow::Result<()> {
             const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
         }
-        cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()?;
+        // Kept to learn how it ended (`service_status`).
+        *system::CHILD.lock().unwrap() = Some(cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()?);
         Ok(())
     }
 }
@@ -255,12 +270,23 @@ fn forward_events(app: AppHandle, rx: std::sync::mpsc::Receiver<ClientEvent>) {
     std::thread::spawn(move || {
         while let Ok(event) = rx.recv() {
             let r = match event {
-                ClientEvent::Online(online) => app.emit("hub:online", online),
+                ClientEvent::Online(online) => {
+                    system::note_online(online);
+                    let r = app.emit("hub:online", online);
+                    live::refresh(&app);
+                    r
+                }
                 ClientEvent::Event(Event::Input(i)) => app.emit("hub:input", i),
-                ClientEvent::Event(Event::State(s)) => app.emit("hub:state", s),
+                ClientEvent::Event(Event::State(s)) => {
+                    let r = app.emit("hub:state", s.clone());
+                    live::on_state(&app, s);
+                    r
+                }
                 ClientEvent::Event(Event::Modules(m)) => app.emit("hub:modules", m),
                 ClientEvent::Event(Event::Display(d)) => app.emit("hub:display", Display::from(d)),
                 ClientEvent::Event(Event::ConfigChanged) => {
+                    // The tray and the shortcuts follow every change, ours or not.
+                    live::refresh(&app);
                     // Ignore the echo of our own save; pass on edits made elsewhere.
                     let state = app.state::<AppState>();
                     let ours = state.client.config().ok().is_some_and(|t| state.last_sent.lock().unwrap().as_deref() == Some(t.as_str()));
@@ -286,7 +312,7 @@ fn linux_webkit_env() {
     }
     // SAFETY: called before any threads are started.
     unsafe {
-        if Path::new("/proc/driver/nvidia").exists() && std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err() {
+        if std::path::Path::new("/proc/driver/nvidia").exists() && std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err() {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
         if std::env::var("GDK_GL").is_err() {
@@ -305,9 +331,36 @@ pub fn run() {
         let _ = tx.send(e);
     });
     tauri::Builder::default()
+        // First: a second launch (the app lives in the tray) shows the running window instead.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| tray::show_main(app)))
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState { client, renderer: Renderer::new(None), last_sent: Mutex::new(None) })
+        .manage(AppState {
+            client,
+            renderer: Renderer::new(None),
+            last_sent: Mutex::new(None),
+            live: Mutex::new(live::Live::default()),
+            bindings: Mutex::new(HashMap::new()),
+            shortcuts_ready: AtomicBool::new(false),
+            tray_ready: AtomicBool::new(false),
+            overlay_generation: AtomicU64::new(0),
+        })
+        .on_window_event(|window, event| {
+            // Close to the tray, when there is one.
+            if window.label() == "main"
+                && let tauri::WindowEvent::CloseRequested { api, .. } = event
+            {
+                let app = window.app_handle();
+                let state = app.state::<AppState>();
+                if state.tray_ready.load(std::sync::atomic::Ordering::Relaxed) && state.live.lock().unwrap().close_to_tray() {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(move |app| {
+            shortcuts::init(app.handle());
+            tray::create(app.handle());
+            overlay::create(app.handle());
             forward_events(app.handle().clone(), rx);
             // Windows/macOS: the service is bundled with the app; start it if it isn't running
             // (on Linux systemd starts it).
@@ -340,6 +393,24 @@ pub fn run() {
             audio_info,
             start_service,
             restart_service,
+            system::service_status,
+            system::service_log,
+            system::service_log_dir,
+            system::service_autostart,
+            system::set_service_autostart,
+            system::system_checks,
+            system::system_info,
+            system::vendor_app,
+            system::close_vendor_app,
+            system::run_command_test,
+            system::open_window_titles,
+            system::identify,
+            claude_hooks::claude_hooks_status,
+            claude_hooks::claude_hooks_install,
+            claude_hooks::claude_hooks_remove,
+            overlay::overlay_undo,
+            overlay::overlay_hide,
+            games::games_bridge,
             games::games_list,
             games::games_plan,
             games::games_setup,

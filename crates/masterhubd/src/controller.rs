@@ -49,6 +49,8 @@ pub enum Msg {
     ApplyConfig { config: Box<Config>, text: String },
     SetProfile(String),
     ShowPage(String),
+    /// Stop or resume the actions bound to controls (`run_action` and claims keep working).
+    Pause(bool),
     SetSetup(String),
     /// Pin a profile (the live one when `None`) in the active hybrid setup.
     Pin(Option<String>),
@@ -223,6 +225,8 @@ pub struct Controller {
     dial_hold: Option<DialHold>,
     /// The picker took the dial press; its release does nothing either.
     swallow_dial_up: bool,
+    /// `pause`: controls run no actions.
+    paused: bool,
     /// The Base LED blinking on a setup change: colour, step, next step.
     setup_blink: Option<(Rgb, u8, Instant)>,
     identify: Option<Identify>,
@@ -316,6 +320,7 @@ impl Controller {
             picker: None,
             dial_hold: None,
             swallow_dial_up: false,
+            paused: false,
             setup_blink: None,
             identify: None,
             preview: None,
@@ -413,6 +418,14 @@ impl Controller {
                 }
             }
             Msg::ShowPage(name) => self.show_page(&name),
+            Msg::Pause(paused) => {
+                if self.paused != paused {
+                    log::info!("control actions {}", if paused { "paused" } else { "resumed" });
+                    self.paused = paused;
+                    self.dial_hold = None;
+                    self.publish_state();
+                }
+            }
             Msg::SetSetup(name) => self.set_setup(&name),
             Msg::Pin(profile) => {
                 let i = match profile {
@@ -1920,7 +1933,7 @@ impl Controller {
                 claim,
             };
             self.events.send(Event::Input(msg));
-            if claim.is_some() {
+            if claim.is_some() || self.paused {
                 continue;
             }
             if control == "dial" && self.dial_input(event) {
@@ -2049,6 +2062,7 @@ impl Controller {
             setup: Some(self.active_setup().name),
             reason: self.reason.clone(),
             pinned: self.engine.pin_state(&self.config),
+            paused: self.paused,
         };
         let changed = {
             let mut s = self.snapshot.lock().unwrap();
@@ -2470,6 +2484,20 @@ apps = ["*ghostty"]
         c.handle(Msg::SetSetup("Work".into()));
         c.handle(Msg::Pin(None));
         assert!(c.engine.pin.is_none());
+    }
+
+    #[test]
+    fn pause_is_published_and_leaves_run_action_alone() {
+        let mut c = controller(LEGACY);
+        c.publish_state();
+        assert!(!c.snapshot.lock().unwrap().state.paused);
+        c.handle(Msg::Pause(true));
+        assert!(c.paused && c.snapshot.lock().unwrap().state.paused);
+        // Clients (tray, shortcuts, `ctl`) still switch while the controls are paused.
+        c.handle(Msg::RunAction { action: Action::Profile("Shell".into()), value: None });
+        assert_eq!(c.profile_name(), Some("Shell"));
+        c.handle(Msg::Pause(false));
+        assert!(!c.snapshot.lock().unwrap().state.paused);
     }
 
     #[test]

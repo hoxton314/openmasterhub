@@ -35,6 +35,8 @@
 //! | `release_claim` | `claim` | end another client's claim (capability `release_claim`) |
 //! | `get_system_info` | | [`SystemInfo`] (capability `system_info`) |
 //! | `get_claims` | | every claim, `Vec<ClaimState>` (also the `claims` event; capability `claim_details`) |
+//! | `get_open_windows` | | open windows with their titles, `Vec<`[`WindowInfo`]`>` (capability `window_titles`) |
+//! | `pause` | `paused` | stop (or resume) running the actions bound to controls; `run_action` still works (capability `pause`) |
 //!
 //! Services without a capability answer its requests with an error; services older than
 //! `get_capabilities` answer that with an error too, which clients treat as an empty list.
@@ -108,6 +110,9 @@ pub struct HubState {
     /// Hybrid setups: the pinned profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pinned: Option<PinState>,
+    /// Control actions are paused (capability `pause`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub paused: bool,
 }
 
 /// Why the live profile is live.
@@ -160,6 +165,18 @@ pub mod capability {
     pub const RELEASE_CLAIM: &str = "release_claim";
     /// `priority`, `apps`, `pid` and `program` in [`super::ClaimState`].
     pub const CLAIM_DETAILS: &str = "claim_details";
+    /// `get_open_windows`.
+    pub const WINDOW_TITLES: &str = "window_titles";
+    /// `pause` and `HubState::paused`.
+    pub const PAUSE: &str = "pause";
+}
+
+/// One open window, for `get_open_windows`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowInfo {
+    /// Window class (the `.exe` name on Windows), as profiles match it.
+    pub class: String,
+    pub title: String,
 }
 
 /// `get_system_info`: what the service runs on.
@@ -362,6 +379,10 @@ pub enum Request {
     GetSystemInfo,
     /// Every claim, `Vec<ClaimState>`.
     GetClaims,
+    /// Open windows with their titles, `Vec<WindowInfo>`.
+    GetOpenWindows,
+    /// Stop or resume running the actions bound to controls (`run_action` and claims still work).
+    Pause { paused: bool },
 }
 
 /// Suggestions for the targets of volume and mute actions.
@@ -636,6 +657,14 @@ impl Client {
     /// Every claim; empty for services that predate the request.
     pub fn claims(&self) -> Vec<ClaimState> {
         self.get(Request::GetClaims).unwrap_or_default()
+    }
+    /// Open windows with titles (capability `window_titles`).
+    pub fn open_windows(&self) -> Result<Vec<WindowInfo>> {
+        self.get(Request::GetOpenWindows)
+    }
+    /// Pause or resume control actions (capability `pause`).
+    pub fn pause(&self, paused: bool) -> Result<()> {
+        self.call(Request::Pause { paused }).map(|_| ())
     }
 }
 

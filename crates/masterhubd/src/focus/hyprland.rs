@@ -102,11 +102,18 @@ fn active_class(dir: &std::path::Path) -> Option<(String, String)> {
     Some((v.get("class")?.as_str()?.to_owned(), title))
 }
 
-/// Classes of all open windows (`j/clients`).
-pub fn window_classes() -> Result<Vec<String>> {
+/// Class and title of all open windows (`j/clients`).
+pub fn window_list() -> Result<Vec<(String, String)>> {
     let dir = instance_dir().context("Hyprland is not running")?;
     let clients: Vec<serde_json::Value> = serde_json::from_str(&request(&dir, "j/clients")?)?;
-    Ok(clients.iter().filter_map(|c| c.get("class")?.as_str().map(str::to_owned)).collect())
+    Ok(clients
+        .iter()
+        .filter_map(|c| {
+            let class = c.get("class")?.as_str()?.to_owned();
+            let title = c.get("title").and_then(|t| t.as_str()).unwrap_or_default().to_owned();
+            Some((class, title))
+        })
+        .collect())
 }
 
 /// Focus the window of `pid`, or of its nearest ancestor that has one (the terminal a CLI

@@ -43,6 +43,19 @@ pub struct Stats {
     pub stamina_inf: bool,
 }
 
+/// How the app shows a game's bridge: `connected` (stats are fresh), `disconnected` (the mod is
+/// installed, the game is not running) or `error` (its folder is missing). `None`: no bridge mod.
+pub fn state(dir: Option<&std::path::Path>) -> Option<&'static str> {
+    let dir = dir?;
+    Some(if Bridge::new(dir.to_owned()).stats().is_some() {
+        "connected"
+    } else if dir.is_dir() {
+        "disconnected"
+    } else {
+        "error"
+    })
+}
+
 pub struct Bridge {
     dir: PathBuf,
     last_seq: u128,

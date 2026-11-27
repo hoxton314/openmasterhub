@@ -33,7 +33,7 @@ const WINDOWS_JS: &str = include_str!("kwin/windows.js");
 /// What a one-shot script answers.
 enum Reply {
     Raised(bool),
-    Windows(Vec<String>),
+    Windows(Vec<(String, String)>),
 }
 
 /// One-shot scripts waiting for their answer, by token.
@@ -75,10 +75,20 @@ impl Focus {
         self.reply(token, Reply::Raised(found));
     }
 
-    /// Called by the window list script: the classes of the open windows, one per line.
-    fn windows(&self, token: &str, classes: &str) {
-        self.reply(token, Reply::Windows(classes.lines().map(str::to_owned).collect()));
+    /// Called by the window list script: the open windows, one `class<TAB>title` per line.
+    fn windows(&self, token: &str, windows: &str) {
+        self.reply(token, Reply::Windows(parse_windows(windows)));
     }
+}
+
+/// `class<TAB>title` lines of the window list script.
+fn parse_windows(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .map(|l| {
+            let (class, title) = l.split_once('\t').unwrap_or((l, ""));
+            (class.to_owned(), title.to_owned())
+        })
+        .collect()
 }
 
 impl Focus {
@@ -257,10 +267,10 @@ pub fn raise(pid: u32, title: Option<&str>) -> Result<()> {
     }
 }
 
-/// Classes of the open windows.
-pub fn window_classes() -> Result<Vec<String>> {
+/// Class and title of the open windows.
+pub fn window_list() -> Result<Vec<(String, String)>> {
     match one_shot("windows", |token| WINDOWS_JS.replace("__TOKEN__", &serde_json::Value::from(token).to_string()))? {
-        Reply::Windows(classes) => Ok(classes),
+        Reply::Windows(windows) => Ok(windows),
         Reply::Raised(_) => bail!("unexpected answer from KWin"),
     }
 }
@@ -307,6 +317,14 @@ fn raise_script(pids: &[u32], token: &str, title: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_window_lines() {
+        assert_eq!(
+            parse_windows("firefox\tMozilla Firefox\nkitty\n"),
+            vec![("firefox".to_owned(), "Mozilla Firefox".to_owned()), ("kitty".to_owned(), String::new())]
+        );
+    }
 
     #[test]
     fn fills_the_raise_script() {
