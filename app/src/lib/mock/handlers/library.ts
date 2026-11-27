@@ -2,7 +2,7 @@
 // base ones in ../mock.ts.
 
 import type { ClaimInfo, GamePlan, GameStatus } from '../../types';
-import type { MockHandlers } from '../mock';
+import type { MockContext, MockHandlers } from '../mock';
 
 // URL switches for design work: `?states=cyberpunk:bridge_down,deadlock:error` forces a game's
 // state (bridge_down | error | running); `?hooks=missing` pretends no Claude hooks are installed.
@@ -22,11 +22,11 @@ const sessions = [
   { name: 'docs', status: 'attention' },
 ];
 
+export function onSnapshot({ emit }: MockContext) {
+  setTimeout(() => emit('hub:claims', claims), 300);
+}
+
 export const handlers: MockHandlers = {
-  snapshot: (_a, { snapshot, emit }) => {
-    setTimeout(() => emit('hub:claims', claims), 300);
-    return snapshot;
-  },
   release_claim: (args, { emit }) => {
     claims = claims.filter((c) => c.claim !== args?.claim);
     emit('hub:claims', claims);

@@ -7,7 +7,7 @@
 //   ?firstrun                            the config has no `app.first_run_done` (S29)
 
 import type { Snapshot } from '../../types';
-import type { MockHandlers } from '../mock';
+import type { MockContext, MockHandlers } from '../mock';
 
 const params = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
 let service = params.get('service');
@@ -44,17 +44,10 @@ const own: MockHandlers = {
   open_path: (a) => console.info('[mock] open_path', a?.path),
   backup_config: () => '/home/you/.config/openmasterhub/backups/config-2026-11-26.toml',
   restore_config: () => undefined,
-  export_toml: () => '/home/you/openmasterhub-export.toml',
-  import_toml: () => undefined,
 };
 
-/**
- * Another handler file answers `snapshot` first, so the URL switches are applied to the shared
- * snapshot the first time a command reaches this file (`themes_list`, asked at app start, is
- * the first one); the `has` trap below runs once and answers like a normal lookup.
- */
-let applied = false;
-function applyFlags(snapshot: Snapshot) {
+/** Applies the URL switches to the shared snapshot before the app asks for it. */
+export function init({ snapshot }: MockContext) {
   if (service) snapshot.online = false;
   if (params.get('modules') === 'none') snapshot.modules = [];
   if (params.has('replug')) for (const m of snapshot.modules) if (m.kind === 'keypad') m.needs_replug = true;
@@ -72,13 +65,4 @@ function bringUp(emit: (event: string, payload: unknown) => void, snapshot: Snap
   }, 1800);
 }
 
-export const handlers: MockHandlers = new Proxy(own, {
-  has(target, key) {
-    if (!applied) {
-      applied = true;
-      // Asks like the app does; whichever file answers `snapshot` returns the shared object.
-      void import('../mock').then((m) => m.invoke('snapshot')).then((s) => applyFlags(s as Snapshot));
-    }
-    return key in target;
-  },
-});
+export const handlers = own;

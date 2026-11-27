@@ -2,14 +2,14 @@
 // `?demo=claim` starts with Cyberpunk 2077 live in Play, with its game mode claiming the keypad
 // and dial (the S03 situation).
 
-import type { ClaimInfo, Snapshot } from '../../types';
-import type { MockHandlers } from '../mock';
+import type { ClaimInfo } from '../../types';
+import type { MockContext, MockHandlers } from '../mock';
 
-let started = false;
+const demo = typeof location !== 'undefined' && new URLSearchParams(location.search).get('demo') === 'claim';
 
-function demoClaim(snapshot: Snapshot, emit: (event: string, payload: unknown) => void) {
-  started = true;
-  if (typeof location === 'undefined' || new URLSearchParams(location.search).get('demo') !== 'claim') return;
+/** The state of the demo: the game is live; its claim arrives with the snapshot (see onSnapshot). */
+export function init({ snapshot }: MockContext) {
+  if (!demo) return;
   snapshot.state = {
     ...snapshot.state!,
     setup: 'Play',
@@ -18,20 +18,25 @@ function demoClaim(snapshot: Snapshot, emit: (event: string, payload: unknown) =
     active_app: 'Cyberpunk2077.exe',
     reason: { kind: 'rule', pattern: 'steam_app_1091500', index: 0 },
   };
-  const claim: ClaimInfo = {
-    claim: 1,
-    name: 'Cyberpunk 2077 mode',
-    active: true,
-    owns: { keys: Array.from({ length: 15 }, (_, i) => i), dial: true },
-    priority: 50,
-    apps: ['steam_app_1091500'],
-  };
-  setTimeout(() => emit('hub:claims', [claim]), 700);
 }
 
-export const handlers: MockHandlers = {
-  snapshot: (_args, { snapshot, emit }) => {
-    if (!started) demoClaim(snapshot, emit);
-    return snapshot;
-  },
+const claim: ClaimInfo = {
+  claim: 7,
+  name: 'Cyberpunk 2077 mode',
+  active: true,
+  owns: { keys: Array.from({ length: 15 }, (_, i) => i), dial: true },
+  priority: 50,
+  apps: ['steam_app_1091500'],
+  pid: 4410,
+  program: 'built-in',
 };
+
+let announced = false;
+/** Upserts the claim (same id as library's), so it is there even with `?claims=none`. */
+export function onSnapshot({ emit }: MockContext) {
+  if (!demo || announced) return;
+  announced = true;
+  setTimeout(() => emit('hub:claim', claim), 700);
+}
+
+export const handlers: MockHandlers = {};

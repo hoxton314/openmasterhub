@@ -2,7 +2,11 @@
 //
 // Commands are looked up in the per-area handler files first (handlers/*.ts, one per work
 // package, so areas never edit the same mock file), then in the base commands below.
-// URL switches: `?caps=none` pretends to be an old service without capabilities.
+// An area module exports `handlers` and optionally `init(ctx)` (once, before the app starts:
+// apply URL switches to the shared snapshot) and `onSnapshot(ctx)` (each time the app asks for
+// the snapshot, with listeners registered: schedule events). Nobody overrides `snapshot` itself,
+// so every URL switch composes: `?service=…`, `?modules=none`, `?replug`, `?vendor`, `?firstrun`,
+// `?demo=claim`, `?states=…`, `?claims=none`, `?hooks=missing`, `?game=…`, `?caps=none`.
 
 import sample from './snapshot.json';
 import type { Face, Snapshot } from '../types';
@@ -24,6 +28,12 @@ export interface MockContext {
 }
 export type MockCommand = (args: Record<string, unknown> | undefined, ctx: MockContext) => unknown;
 export type MockHandlers = Record<string, MockCommand>;
+/** What a handler file exports. */
+export interface MockModule {
+  handlers: MockHandlers;
+  init?: (ctx: MockContext) => void;
+  onSnapshot?: (ctx: MockContext) => void;
+}
 
 const listeners: Record<string, Handler[]> = {};
 const emit = (event: string, payload: unknown) => (listeners[event] ?? []).forEach((h) => h({ payload }));
@@ -37,7 +47,9 @@ const params = typeof location === 'undefined' ? new URLSearchParams() : new URL
 snapshot.capabilities = params.get('caps') === 'none' ? [] : (snapshot.capabilities ?? ALL_CAPABILITIES);
 
 const ctx: MockContext = { snapshot, emit };
-const areas: MockHandlers[] = [editor, inspector, setups, profiles, library, global, system].map((m) => m.handlers);
+const modules: MockModule[] = [editor, inspector, setups, profiles, library, global, system];
+const areas: MockHandlers[] = modules.map((m) => m.handlers);
+for (const m of modules) m.init?.(ctx);
 
 export function listen(event: string, handler: Handler) {
   (listeners[event] ??= []).push(handler);
@@ -84,6 +96,7 @@ const userThemes: UserThemeFile[] = [
 async function base(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
   switch (cmd) {
     case 'snapshot':
+      for (const m of modules) m.onSnapshot?.(ctx);
       return snapshot;
     case 'save_config':
       snapshot.config = args?.config as Snapshot['config'];
