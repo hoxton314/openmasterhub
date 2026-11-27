@@ -28,7 +28,8 @@ export const SHORTCUT_GROUPS: { title: string; items: Shortcut[] }[] = [
     title: 'Editor',
     items: [
       { combo: 'left', label: 'Move to the control on the left (arrow keys)' },
-      { combo: 'i', label: 'In the browser preview: simulate a key press' },
+      // The mock only exists in dev builds (browser preview).
+      ...(import.meta.env.DEV ? [{ combo: 'i', label: 'In the browser preview: simulate a key press' }] : []),
     ],
   },
 ];

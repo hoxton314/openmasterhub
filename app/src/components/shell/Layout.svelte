@@ -1,5 +1,6 @@
 <!--
-  Area layout: [sidebar 236 | main (topbar + content) | inspector 344].
+  Area layout: [sidebar 236 | topbar over (main | inspector 344)], as in the artboards: the topbar
+  spans the canvas and the inspector.
   ≤1100 px wide: the sidebar collapses (52 px, `collapsed` passed to its snippet) and the inspector
   narrows to 320 px (S01b). 1101–1279 px: the inspector becomes a drawer over the canvas, opened
   with `ui.drawer`. Any snippet may be omitted.
@@ -49,22 +50,21 @@
   {#if sidebar}
     <aside class="sidebar" aria-label="Sidebar">{@render sidebar({ collapsed })}</aside>
   {/if}
-  <div class="center">
+  <div class="right">
     {#if topbar}<header class="topbar">{@render topbar({ drawer })}</header>{/if}
-    <div class="main">{@render main()}</div>
-  </div>
-  {#if inspector}
-    {#if drawer}
-      {#if ui.drawer}
-        <aside class="inspector drawer" class:below-topbar={!!topbar} aria-label={inspectorLabel}>
-          <span class="close"><IconButton icon={X} size="sm" label="Close {inspectorLabel.toLowerCase()}" onclick={() => (ui.drawer = false)} /></span>
-          {@render inspector()}
-        </aside>
+    <div class="body">
+      <div class="main">{@render main()}</div>
+      {#if inspector && !drawer}
+        <aside class="inspector" aria-label={inspectorLabel}>{@render inspector()}</aside>
       {/if}
-    {:else}
-      <aside class="inspector" aria-label={inspectorLabel}>{@render inspector()}</aside>
+    </div>
+    {#if inspector && drawer && ui.drawer}
+      <aside class="inspector drawer" class:below-topbar={!!topbar} aria-label={inspectorLabel}>
+        <span class="close"><IconButton icon={X} size="sm" label="Close {inspectorLabel.toLowerCase()}" onclick={() => (ui.drawer = false)} /></span>
+        {@render inspector()}
+      </aside>
     {/if}
-  {/if}
+  </div>
 </div>
 
 <style>
@@ -88,11 +88,17 @@
   .collapsed .sidebar {
     width: var(--size-sidebar-collapsed);
   }
-  .center {
+  .right {
+    position: relative;
     flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
+  }
+  .body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
   }
   .topbar {
     height: var(--size-topbar);
@@ -106,6 +112,7 @@
   }
   .main {
     flex: 1;
+    min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
@@ -146,8 +153,8 @@
   }
   .close {
     position: absolute;
-    top: 8px;
-    right: 8px;
+    top: 14px;
+    right: 52px; /* left of the inspector's own ⋯ menu */
     z-index: 1;
   }
 </style>
