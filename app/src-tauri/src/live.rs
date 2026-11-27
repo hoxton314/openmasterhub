@@ -19,6 +19,16 @@ pub struct Live {
     pub trigger: Option<(Instant, String)>,
 }
 
+/// `[app] overlay`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OverlayMode {
+    /// Only switches the user made (default).
+    Switches,
+    /// Also follow-mode changes caused by the focused window.
+    All,
+    Off,
+}
+
 impl Live {
     pub fn has(&self, capability: &str) -> bool {
         self.capabilities.iter().any(|c| c == capability)
@@ -27,6 +37,15 @@ impl Live {
     /// The `[app]` feedback switch, on unless the user turned it off.
     pub fn feedback(&self, pick: impl Fn(&masterhub_core::config::Feedback) -> Option<bool>) -> Option<bool> {
         self.config.as_ref().and_then(|c| c.app.feedback.as_ref()).and_then(pick)
+    }
+
+    /// `[app] overlay`: which switches get the toast. Unknown values mean the default.
+    pub fn overlay_mode(&self) -> OverlayMode {
+        match self.config.as_ref().and_then(|c| c.app.overlay.as_deref()) {
+            Some("all") => OverlayMode::All,
+            Some("off") => OverlayMode::Off,
+            _ => OverlayMode::Switches,
+        }
     }
 
     /// `[app] close_to_tray = false` keeps the window's close button quitting the app.
@@ -119,6 +138,17 @@ profiles = ["Live", "BRB"]
             std::path::Path::new("."),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn overlay_mode_reads_the_app_table() {
+        let mut live = Live::default();
+        assert_eq!(live.overlay_mode(), OverlayMode::Switches);
+        let with = |v: &str| Config::parse(&format!("[app]\noverlay = \"{v}\"\n"), std::path::Path::new(".")).ok();
+        for (v, want) in [("all", OverlayMode::All), ("off", OverlayMode::Off), ("switches", OverlayMode::Switches), ("bogus", OverlayMode::Switches)] {
+            live.config = with(v);
+            assert_eq!(live.overlay_mode(), want, "{v}");
+        }
     }
 
     #[test]

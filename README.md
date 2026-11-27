@@ -182,8 +182,13 @@ and why, switches setups and the profiles of manual setups, pins and pauses hub 
 Shortcuts from `[[setup]]` (`shortcut`, `next`, `prev`, `pin`) are global on X11 and Windows. On
 Wayland apps cannot grab keys, so bind the same things in your compositor, e.g.
 `masterhubd ctl setup Stream`, `masterhubd ctl profile next`, `masterhubd ctl pin`. A small toast
-near the tray shows each switch (Settings › Feedback); it never takes focus and is skipped while a
-fullscreen window is in front.
+near the tray shows the switches you make: setup switches (with Undo), profiles you switch or pin by
+hand, a released pin. Profiles that follow the focused window change silently; `[app] overlay =
+"all"` shows those too, `"off"` shows nothing (Settings › Feedback). The toast never takes focus and
+is skipped while a fullscreen window is in front. On Wayland it is a layer-shell overlay in the
+bottom-right corner and needs `gtk-layer-shell` plus a compositor with `wlr-layer-shell`
+(Hyprland, Sway, KDE; not GNOME); without them no toast is shown and the dial card and the Base LED
+still report the switch.
 
 ## Developing the app
 

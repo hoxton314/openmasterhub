@@ -1,14 +1,18 @@
 <!-- The switch toast (S08): which profile or setup just became live, near the tray, 1.5 s (5 s with
   Undo for a setup). The Rust side shows and hides the window (it never takes focus) and sends
-  `overlay:show`. In a browser (`overlay.html?demo=setup|profile`) it shows a sample. -->
+  `overlay:show`; the window is exactly the card, so the page measures it and answers with
+  `overlay_fit` (the window is shown then). In a browser (`overlay.html?demo=setup|profile`) it
+  shows a sample. -->
 <script lang="ts">
   import { Hand, Layers, Undo2 } from 'lucide-svelte';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { invoke, listen } from '../lib/backend';
   import { adoptAppSettings } from '../lib/theme/theme.svelte';
   import type { AppSettings } from '../lib/types';
 
   interface Toast {
+    /** Echoed in `overlay_fit`. */
+    generation?: number;
     kind: 'profile' | 'setup';
     title: string;
     /** The line above the title. */
@@ -31,11 +35,35 @@
     setup: { kind: 'setup', title: 'Stream', line: 'Setup switched · Ctrl Alt F12', undo: 'Work', secs: 5, color: '#8B90FF' },
   };
 
-  function show(t: Toast) {
+  let card = $state<HTMLElement | undefined>();
+  let sent = '';
+
+  /** Tell the Rust side how big the card is (logical px) so the window matches it. */
+  function fit(force = false) {
+    if (!card || !toast || toast.generation === undefined) return;
+    const w = card.offsetWidth;
+    const h = card.offsetHeight;
+    const key = `${toast.generation}:${w}x${h}`;
+    if (!force && key === sent) return;
+    sent = key;
+    invoke('overlay_fit', { generation: toast.generation, width: w, height: h }).catch(() => undefined);
+  }
+
+  async function show(t: Toast) {
     if (t.app) adoptAppSettings(t.app);
     toast = t;
     shown++;
+    await tick();
+    fit(true);
   }
+
+  // The card can change size after fonts or a theme arrive.
+  $effect(() => {
+    if (!card) return;
+    const ro = new ResizeObserver(() => fit());
+    ro.observe(card);
+    return () => ro.disconnect();
+  });
 
   onMount(() => {
     void listen<Toast>('overlay:show', (e) => show(e.payload));
@@ -48,7 +76,7 @@
 
 {#if toast}
   {#key shown}
-    <div class="card" role="status" aria-live="polite" style:--tile={toast.color || undefined}>
+    <div class="card" bind:this={card} role="status" aria-live="polite" style:--tile={toast.color || undefined}>
       <span class="tile"><Icon size={18} /></span>
       <div class="text">
         <div class="line t-chip">{toast.line}</div>
@@ -66,11 +94,10 @@
   :global(html.overlay body) {
     background: transparent;
   }
-  :global(html.overlay #app) {
-    display: grid;
-    align-content: end;
-    justify-items: end;
-    padding: 6px 16px 16px 16px;
+  /* The window is exactly the card: no padding, no shadow (it would be cut off at the edge). */
+  :global(html.overlay body) {
+    margin: 0;
+    overflow: hidden;
   }
   .card {
     display: flex;
@@ -81,7 +108,6 @@
     color: var(--color-text-1);
     background: var(--color-raised);
     border-radius: var(--radius-toast);
-    box-shadow: var(--shadow-popover);
     outline: 1px solid var(--color-border-2);
     outline-offset: -1px;
     animation: rise var(--motion-toast-in);

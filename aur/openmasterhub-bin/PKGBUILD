@@ -10,6 +10,7 @@ license=('MIT')
 depends=('webkit2gtk-4.1' 'gtk3' 'glibc' 'gcc-libs' 'systemd')
 optdepends=(
   'libayatana-appindicator: tray icon and close-to-tray'
+  'gtk-layer-shell: switch toast on Wayland (Hyprland, Sway, KDE)'
   'wireplumber: volume widget and volume actions (wpctl)'
   'nvidia-utils: NVIDIA GPU usage/temperature widgets'
   'curl: cover art for the now-playing widget'

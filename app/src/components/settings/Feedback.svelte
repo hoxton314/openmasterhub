@@ -3,6 +3,7 @@
   import { hasCapability, hub } from '../../lib/hub.svelte';
   import Banner from '../ui/Banner.svelte';
   import SectionLabel from '../ui/SectionLabel.svelte';
+  import Segmented from '../ui/Segmented.svelte';
   import Toggle from '../ui/Toggle.svelte';
   import { saveApp } from './actions';
   import Page from './Page.svelte';
@@ -10,6 +11,7 @@
 
   const fb = $derived(hub.config.app?.feedback ?? {});
   const on = (v: boolean | undefined) => v !== false;
+  const overlay = $derived(hub.config.app?.overlay === 'all' || hub.config.app?.overlay === 'off' ? hub.config.app.overlay : 'switches');
   const set = (patch: Partial<NonNullable<typeof fb>>) => saveApp({ feedback: { ...fb, ...patch } }, 'feedback change');
 </script>
 
@@ -18,6 +20,18 @@
     <SectionLabel as="h3">When the profile or setup switches</SectionLabel>
     <Row label="Toast" help="Shown for 1.5 s; setup changes carry an Undo for 5 s">
       <Toggle title="Toast" checked={on(fb.toast)} onchange={(v) => set({ toast: v })} />
+    </Row>
+    <Row label="Toast for" help="Profiles that follow the focused window change all the time, so by default only your own switches show">
+      <Segmented
+        label="Toast for"
+        value={overlay}
+        disabled={!on(fb.toast)}
+        onchange={(v) => saveApp({ overlay: v }, 'toast change')}
+        options={[
+          { value: 'switches', label: 'My switches' },
+          { value: 'all', label: 'Every change' },
+          { value: 'off', label: 'Off' },
+        ]} />
     </Row>
     <Row label="Card on the dial" help="The dial draws the matching card">
       <Toggle title="Card on the dial" checked={on(fb.dial)} onchange={(v) => set({ dial: v })} />

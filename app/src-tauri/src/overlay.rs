@@ -1,29 +1,45 @@
 //! The switch toast (S08): a small always-on-top window near the tray that says which profile
 //! or setup just became live. It never takes focus, is skipped while a fullscreen window has
 //! the foreground (unless `[app.feedback] in_fullscreen = true`) and is drawn by the same UI
-//! and theme engine as the app (`overlay.html`). Wayland compositors place the window
-//! themselves, so there it appears wherever they put new windows.
+//! and theme engine as the app (`overlay.html`). By default it only shows switches the user
+//! made, not follow-mode changes caused by the focused window (`[app] overlay`).
+//!
+//! The window is exactly as big as the toast: the page measures its card and reports it with
+//! `overlay_fit`, which sizes, places and shows the window. On Wayland a normal window cannot
+//! be placed or kept on top, so there it is a wlr layer-shell surface (`layer.rs`); without
+//! layer-shell (GNOME) no window is shown at all, the dial card and the LED still report.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use masterhub_core::ipc::HubState;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 
 use crate::AppState;
-use crate::live::describe;
+use crate::live::{OverlayMode, describe};
 
 const LABEL: &str = "overlay";
-/// Logical size; the card inside is 320 wide.
-const WIDTH: f64 = 352.0;
-const HEIGHT: f64 = 84.0;
+/// Logical size until the page reports the card's.
+const WIDTH: f64 = 320.0;
+const HEIGHT: f64 = 60.0;
 const MARGIN: f64 = 12.0;
 const PROFILE_SECS: f64 = 1.5;
 const SETUP_SECS: f64 = 5.0;
 
+/// How the window is shown, decided once in `create`.
+const WINDOW: u8 = 0;
+/// A wlr layer-shell surface (Wayland).
+#[cfg(target_os = "linux")]
+const LAYER: u8 = 1;
+/// Wayland without layer-shell: nothing is shown.
+const NONE: u8 = 2;
+static BACKEND: AtomicU8 = AtomicU8::new(WINDOW);
+
 #[derive(Serialize, Clone, Debug)]
 struct Toast {
+    /// Echoed by `overlay_fit`, so a late answer for an older toast is ignored.
+    generation: u64,
     /// `profile` or `setup`.
     kind: &'static str,
     title: String,
@@ -53,8 +69,79 @@ pub fn create(app: &AppHandle) {
         .focusable(false)
         .visible(false)
         .build();
-    if let Err(e) = built {
-        log::warn!("switch overlay: {e}");
+    match built {
+        Ok(window) => init_backend(&window),
+        Err(e) => {
+            log::warn!("switch overlay: {e}");
+            BACKEND.store(NONE, Ordering::Relaxed);
+        }
+    }
+}
+
+/// On Wayland turn the (still unmapped) window into a layer-shell surface.
+fn init_backend(window: &tauri::WebviewWindow) {
+    #[cfg(target_os = "linux")]
+    {
+        use gtk::prelude::*;
+        let gtk_window = match window.gtk_window() {
+            Ok(w) => w,
+            Err(e) => {
+                log::warn!("switch overlay: {e}");
+                BACKEND.store(NONE, Ordering::Relaxed);
+                return;
+            }
+        };
+        if !gtk_window.display().type_().name().contains("Wayland") {
+            return;
+        }
+        match crate::layer::init(&gtk_window, MARGIN as i32) {
+            Ok(()) => {
+                BACKEND.store(LAYER, Ordering::Relaxed);
+                warm_up(window);
+            }
+            Err(e) => {
+                log::info!("switch overlay: not shown, no layer-shell here ({e}); the dial card and the LED still show switches");
+                BACKEND.store(NONE, Ordering::Relaxed);
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = window;
+}
+
+/// A layer-shell surface that is mapped for the first time with its toast already in the page
+/// stays blank (the webview paints nothing). Mapping it empty and transparent once at start,
+/// long enough for a few frames, avoids that.
+#[cfg(target_os = "linux")]
+fn warm_up(window: &tauri::WebviewWindow) {
+    let window = window.clone();
+    std::thread::spawn(move || {
+        let w = window.clone();
+        let _ = window.run_on_main_thread(move || {
+            let _ = w.show();
+        });
+        std::thread::sleep(Duration::from_millis(400));
+        let w = window.clone();
+        let _ = window.run_on_main_thread(move || {
+            let _ = w.hide();
+        });
+    });
+}
+
+/// Whether a state change is a switch the toast is for, under `[app] overlay`.
+fn wanted(mode: OverlayMode, prev: &HubState, new: &HubState, setup_changed: bool) -> bool {
+    use masterhub_core::ipc::Reason;
+    match mode {
+        OverlayMode::Off => false,
+        OverlayMode::All => true,
+        OverlayMode::Switches => {
+            // The user chose a setup, or let go of a pin.
+            if setup_changed || (prev.pinned.is_some() && new.pinned.is_none()) {
+                return true;
+            }
+            // Rules and the fallback are follow mode reacting to the focused window.
+            !matches!(new.reason, Some(Reason::Rule { .. } | Reason::Fallback))
+        }
     }
 }
 
@@ -63,13 +150,17 @@ pub fn on_change(app: &AppHandle, prev: Option<&HubState>, new: &HubState) {
     let Some(prev) = prev else { return };
     let setup_changed = new.setup.is_some() && prev.setup != new.setup;
     let profile_changed = !new.profile.is_empty() && prev.profile != new.profile;
-    if !setup_changed && !profile_changed {
+    let pin_changed = prev.pinned.is_some() != new.pinned.is_some();
+    if !setup_changed && !profile_changed && !pin_changed {
+        return;
+    }
+    if BACKEND.load(Ordering::Relaxed) == NONE {
         return;
     }
     let state = app.state::<AppState>();
     let (toast, in_fullscreen) = {
         let live = state.live.lock().unwrap();
-        if live.feedback(|f| f.toast) == Some(false) {
+        if live.feedback(|f| f.toast) == Some(false) || !wanted(live.overlay_mode(), prev, new, setup_changed) {
             return;
         }
         let Some(config) = live.config.as_ref() else { return };
@@ -80,6 +171,7 @@ pub fn on_change(app: &AppHandle, prev: Option<&HubState>, new: &HubState) {
             let name = new.setup.clone().unwrap_or_default();
             let how = live.trigger.as_ref().filter(|(at, _)| at.elapsed() < Duration::from_secs(2)).map(|(_, t)| t.clone());
             Toast {
+                generation: 0,
                 kind: "setup",
                 color: config.effective_setups().iter().find(|s| s.name == name).and_then(|s| s.color).map(|c| c.to_hex()),
                 title: name,
@@ -94,6 +186,7 @@ pub fn on_change(app: &AppHandle, prev: Option<&HubState>, new: &HubState) {
         } else {
             let setup = new.setup.as_deref().unwrap_or_default();
             Toast {
+                generation: 0,
                 kind: "profile",
                 color: config.profile(&new.profile).and_then(|p| p.color).map(|c| c.to_hex()),
                 title: new.profile.clone(),
@@ -115,20 +208,18 @@ pub fn on_change(app: &AppHandle, prev: Option<&HubState>, new: &HubState) {
     show(app, toast);
 }
 
-fn show(app: &AppHandle, toast: Toast) {
-    let Some(window) = app.get_webview_window(LABEL) else { return };
+fn show(app: &AppHandle, mut toast: Toast) {
+    if app.get_webview_window(LABEL).is_none() {
+        return;
+    }
     let generation = app.state::<AppState>().overlay_generation.fetch_add(1, Ordering::Relaxed) + 1;
+    toast.generation = generation;
     let secs = toast.secs;
-    if let Err(e) = window.emit("overlay:show", toast) {
+    // The page draws the card, measures it and answers with `overlay_fit`, which shows the window.
+    if let Err(e) = app.emit_to(LABEL, "overlay:show", toast) {
         log::warn!("switch overlay: {e}");
         return;
     }
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let Some(window) = handle.get_webview_window(LABEL) else { return };
-        place(&handle, &window);
-        let _ = window.show();
-    });
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs_f64(secs + 0.4));
@@ -139,7 +230,27 @@ fn show(app: &AppHandle, toast: Toast) {
     });
 }
 
+/// The page measured its card (logical px): size the window to it, place it and show it.
+#[tauri::command]
+pub fn overlay_fit(app: AppHandle, state: tauri::State<AppState>, generation: u64, width: f64, height: f64) {
+    if state.overlay_generation.load(Ordering::Relaxed) != generation || !(8.0..=1200.0).contains(&width) || !(8.0..=1200.0).contains(&height) {
+        return;
+    }
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        let Some(window) = handle.get_webview_window(LABEL) else { return };
+        let _ = window.set_size(LogicalSize::new(width.ceil(), height.ceil()));
+        // The compositor places a layer-shell surface by its anchor and margins.
+        if BACKEND.load(Ordering::Relaxed) == WINDOW {
+            place(&handle, &window, width.ceil(), height.ceil());
+        }
+        let _ = window.show();
+    });
+}
+
 pub fn hide(app: &AppHandle) {
+    // A late `overlay_fit` for the toast that just went away must not show the window again.
+    app.state::<AppState>().overlay_generation.fetch_add(1, Ordering::Relaxed);
     let handle = app.clone();
     let _ = app.run_on_main_thread(move || {
         if let Some(w) = handle.get_webview_window(LABEL) {
@@ -149,11 +260,11 @@ pub fn hide(app: &AppHandle) {
 }
 
 /// Bottom-right of the primary monitor's work area (above the Windows taskbar).
-fn place(app: &AppHandle, window: &tauri::WebviewWindow) {
+fn place(app: &AppHandle, window: &tauri::WebviewWindow, width: f64, height: f64) {
     let Ok(Some(monitor)) = app.primary_monitor() else { return };
     let scale = monitor.scale_factor();
     let area = monitor.work_area();
-    let (w, h, m) = ((WIDTH * scale) as i32, (HEIGHT * scale) as i32, (MARGIN * scale) as i32);
+    let (w, h, m) = ((width * scale) as i32, (height * scale) as i32, (MARGIN * scale) as i32);
     let x = area.position.x + area.size.width as i32 - w - m;
     let y = area.position.y + area.size.height as i32 - h - m;
     let _ = window.set_position(PhysicalPosition::new(x, y));

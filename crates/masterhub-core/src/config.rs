@@ -101,6 +101,10 @@ pub struct AppSettings {
     /// How setup and profile switches are shown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feedback: Option<Feedback>,
+    /// Which switches get the toast: `switches` (default; the ones the user made), `all`
+    /// (also follow-mode changes caused by the focused window) or `off`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub overlay: Option<String>,
     /// Settings of newer app versions, kept unchanged.
     #[serde(flatten)]
     pub other: toml::Table,
@@ -1711,6 +1715,7 @@ mod tests {
         theme_dark = "orchid"
         density = "compact"
         first_run_done = true
+        overlay = "all"
         future_setting = [1, 2]
         [app.feedback]
         toast = true
@@ -1817,7 +1822,7 @@ mod tests {
 
         let toml = cfg.to_toml().unwrap();
         assert_eq!(Config::parse(&toml, Path::new("/x")).unwrap(), cfg, "{toml}");
-        for key in ["[[setup]]", "[app]", "future_setting", "[app.feedback]", "blink_on_setup = false", "except_setups", "hold = 250"] {
+        for key in ["[[setup]]", "[app]", "future_setting", "[app.feedback]", "overlay = \"all\"", "blink_on_setup = false", "except_setups", "hold = 250"] {
             assert!(toml.contains(key), "{key} missing in\n{toml}");
         }
         // Unset setup fields stay unset.
@@ -1830,6 +1835,7 @@ mod tests {
         assert_eq!(json["profile"][0]["page"][0]["key"][2]["widget"], serde_json::json!({"kind": "cpu_usage", "refresh": 2}));
         assert_eq!(json["profile"][0]["page"][0]["key"][2]["press"], serde_json::json!({"pin": "toggle"}));
         assert_eq!(json["app"]["feedback"]["toast"], true);
+        assert_eq!(json["app"]["overlay"], "all");
         assert_eq!(serde_json::from_value::<Config>(json).unwrap(), cfg);
     }
 

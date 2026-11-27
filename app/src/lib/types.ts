@@ -212,6 +212,8 @@ export interface AppSettings {
   reduce_motion?: 'system' | 'on' | 'off';
   first_run_done?: boolean;
   feedback?: Feedback;
+  /** Which switches get the toast: your own (default), every change, or none. */
+  overlay?: 'switches' | 'all' | 'off';
 }
 
 export interface Config {

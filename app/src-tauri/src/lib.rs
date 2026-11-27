@@ -5,6 +5,8 @@ mod claude_hooks;
 mod files;
 mod games;
 mod live;
+#[cfg(target_os = "linux")]
+mod layer;
 mod overlay;
 mod shortcuts;
 mod system;
@@ -410,6 +412,7 @@ pub fn run() {
             claude_hooks::claude_hooks_install,
             claude_hooks::claude_hooks_remove,
             overlay::overlay_undo,
+            overlay::overlay_fit,
             overlay::overlay_hide,
             games::games_bridge,
             games::games_list,

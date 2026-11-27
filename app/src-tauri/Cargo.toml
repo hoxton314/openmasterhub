@@ -34,3 +34,8 @@ tauri-plugin-single-instance = "2.5.5"
 [target.'cfg(windows)'.dependencies]
 # The foreground window's size, to keep the switch overlay off fullscreen games.
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The switch toast is a layer-shell surface on Wayland; libgtk-layer-shell is loaded at run time.
+gtk = "0.18"
+libloading = "0.8"
