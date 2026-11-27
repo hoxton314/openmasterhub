@@ -97,6 +97,9 @@ pub struct Claim {
     pub controls: BTreeSet<Control>,
     pub apps: Vec<String>,
     pub priority: i32,
+    /// The claiming client's process and program name, if known.
+    pub pid: Option<u32>,
+    pub program: Option<String>,
     /// Last frame per display target.
     pub frames: HashMap<u8, Arc<Vec<u8>>>,
     pub leds: HashMap<LedZone, LedState>,
@@ -209,6 +212,8 @@ mod tests {
             controls: keys.iter().map(|&k| Control::Key(k)).collect(),
             apps: apps.iter().map(|s| s.to_string()).collect(),
             priority,
+            pid: None,
+            program: None,
             frames: HashMap::new(),
             leds: HashMap::new(),
         }
@@ -258,7 +263,7 @@ mod tests {
 
     #[test]
     fn class_and_title() {
-        let mut c = Claim { name: "wow".into(), controls: Default::default(), apps: vec!["steam_app_battlenet@World of Warcraft".into()], priority: 5, frames: Default::default(), leds: Default::default() };
+        let mut c = Claim { name: "wow".into(), controls: Default::default(), apps: vec!["steam_app_battlenet@World of Warcraft".into()], priority: 5, pid: None, program: None, frames: Default::default(), leds: Default::default() };
         assert!(c.active(Some("steam_app_battlenet"), Some("World of Warcraft")));
         assert!(!c.active(Some("steam_app_battlenet"), Some("Battle.net")));
         assert!(!c.active(Some("kitty"), Some("World of Warcraft")));

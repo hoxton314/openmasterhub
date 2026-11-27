@@ -447,7 +447,7 @@ pub struct Face {
 }
 
 /// How a face's image is placed on its screen.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ImageFit {
     /// Whole image visible.
@@ -576,6 +576,207 @@ impl Config {
             .find(|p| p.key.index == index && !p.except.iter().any(|e| e == profile))
             .map(|p| &p.key)
             .or_else(|| page.key(index))
+    }
+}
+
+// ───────────────────────────── precedence ─────────────────────────────
+//
+// Which config a control uses, per IA-Precedence (top wins): a live-surface claim (the
+// service's business), a pinned key unless the profile or its setup is excluded, the live
+// profile if it sets the control, then its `base` profiles, nearest first. Mirrors
+// `ownerOf` in app/src/lib/model/precedence.ts; keep the two in step.
+
+/// One control of the hub, for [`Config::source_of`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlRef {
+    Key(u8),
+    Dial,
+    Knob(u8),
+    Fader(u8),
+    Roller(Side),
+}
+
+/// Which keypad page of a profile is on screen: by position among its pages, or a folder by
+/// name. A base profile shows its page at the same position, or its folder of that name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageView<'a> {
+    Page(usize),
+    Folder(&'a str),
+}
+
+/// Where a control's config comes from.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Source<'a> {
+    /// A pinned key.
+    Pinned(&'a PinnedKey),
+    /// The profile itself.
+    Own(&'a Profile),
+    /// A base profile; `via` are the profiles walked, nearest first, ending with it.
+    Base { profile: &'a Profile, via: Vec<&'a str> },
+    /// Nothing sets it.
+    None,
+}
+
+impl Face {
+    /// Any field set (an empty label counts as unset).
+    pub fn is_set(&self) -> bool {
+        self.label.as_deref().is_some_and(|l| !l.is_empty())
+            || self.image.is_some()
+            || self.background.is_some()
+            || self.text_color.is_some()
+            || self.widget.is_some()
+            || self.fit.is_some()
+            || self.label_over_image.is_some()
+    }
+}
+
+impl KeyConfig {
+    /// Sets anything beyond its index; an entry that does not falls through to the base.
+    pub fn is_set(&self) -> bool {
+        self.press.is_some() || self.release.is_some() || self.face.is_set()
+    }
+}
+
+impl DialConfig {
+    pub fn is_set(&self) -> bool {
+        self.face.is_set() || [&self.cw, &self.ccw, &self.press, &self.release, &self.long_press].iter().any(|a| a.is_some())
+    }
+}
+
+impl PinnedKey {
+    /// Shown in `profile` while `setup` is active.
+    pub fn applies(&self, profile: &str, setup: Option<&str>) -> bool {
+        !self.except.iter().any(|e| e == profile) && !setup.is_some_and(|s| self.except_setups.iter().any(|e| e == s))
+    }
+}
+
+impl Profile {
+    /// Page `view` in this profile: the page at that position, or the folder of that name.
+    pub fn page_for(&self, view: PageView) -> Option<&Page> {
+        match view {
+            PageView::Folder(name) => self.folders.iter().find(|f| f.name == name),
+            PageView::Page(n) => self.pages.get(n),
+        }
+    }
+
+    /// Whether this profile sets `ctl` (keys on page `view`).
+    fn sets(&self, view: PageView, ctl: ControlRef) -> bool {
+        match ctl {
+            ControlRef::Key(i) => self.page_for(view).and_then(|p| p.key(i)).is_some_and(KeyConfig::is_set),
+            ControlRef::Dial => self.dial.as_ref().is_some_and(DialConfig::is_set),
+            ControlRef::Knob(i) => self
+                .knobs
+                .iter()
+                .any(|k| k.index == i && [&k.cw, &k.ccw, &k.press, &k.release].iter().any(|a| a.is_some())),
+            ControlRef::Fader(i) => self.faders.iter().any(|f| f.index == i && f.change.is_some()),
+            ControlRef::Roller(side) => self.rollers.iter().any(|r| r.side == side && (r.away.is_some() || r.toward.is_some())),
+        }
+    }
+}
+
+impl Config {
+    pub fn profile(&self, name: &str) -> Option<&Profile> {
+        self.profiles.iter().find(|p| p.name == name)
+    }
+
+    /// The base profiles of `profile`, nearest first, stopping at cycles and missing names.
+    pub fn bases(&self, profile: &str) -> Vec<&Profile> {
+        let mut out: Vec<&Profile> = Vec::new();
+        let mut next = self.profile(profile).and_then(|p| p.base.as_deref());
+        while let Some(name) = next {
+            if name == profile || out.iter().any(|p| p.name == name) {
+                break;
+            }
+            let Some(p) = self.profile(name) else { break };
+            out.push(p);
+            next = p.base.as_deref();
+        }
+        out
+    }
+
+    /// The pinned key at `index` shown in `profile` while `setup` is active.
+    pub fn pinned_at(&self, index: u8, profile: &str, setup: Option<&str>) -> Option<&PinnedKey> {
+        self.pinned.iter().find(|p| p.key.index == index && p.applies(profile, setup))
+    }
+
+    /// Where control `ctl` of `profile` comes from while `setup` is active, keys on page `view`.
+    pub fn source_of<'a>(&'a self, profile: &str, view: PageView, setup: Option<&str>, ctl: ControlRef) -> Source<'a> {
+        if let ControlRef::Key(i) = ctl
+            && let Some(p) = self.pinned_at(i, profile, setup)
+        {
+            return Source::Pinned(p);
+        }
+        let Some(own) = self.profile(profile) else { return Source::None };
+        if own.sets(view, ctl) {
+            return Source::Own(own);
+        }
+        let mut via = Vec::new();
+        for b in self.bases(profile) {
+            via.push(b.name.as_str());
+            if b.sets(view, ctl) {
+                return Source::Base { profile: b, via };
+            }
+        }
+        Source::None
+    }
+
+    /// The profile that supplies `ctl`: the profile itself or a base; `None` for pinned keys
+    /// and controls nothing sets.
+    fn supplier<'a>(&'a self, profile: &str, view: PageView, setup: Option<&str>, ctl: ControlRef) -> Option<&'a Profile> {
+        match self.source_of(profile, view, setup, ctl) {
+            Source::Own(p) | Source::Base { profile: p, .. } => Some(p),
+            Source::Pinned(_) | Source::None => None,
+        }
+    }
+
+    /// The key at `index` of `profile` on page `view`: pinned, the profile's own, inherited from
+    /// a base, else the page's own (unset) entry.
+    pub fn key_at<'a>(&'a self, profile: &str, view: PageView, setup: Option<&str>, index: u8) -> Option<&'a KeyConfig> {
+        let ctl = ControlRef::Key(index);
+        if let Source::Pinned(p) = self.source_of(profile, view, setup, ctl) {
+            return Some(&p.key);
+        }
+        let p = self.supplier(profile, view, setup, ctl).or_else(|| self.profile(profile))?;
+        p.page_for(view)?.key(index)
+    }
+
+    /// The dial of `profile`, inherited from a base if it sets none.
+    pub fn dial_of(&self, profile: &str) -> Option<&DialConfig> {
+        match self.supplier(profile, PageView::Page(0), None, ControlRef::Dial) {
+            Some(p) => p.dial.as_ref(),
+            None => self.profile(profile)?.dial.as_ref(),
+        }
+    }
+
+    pub fn knob_of(&self, profile: &str, index: u8) -> Option<&KnobConfig> {
+        let p = self.supplier(profile, PageView::Page(0), None, ControlRef::Knob(index)).or_else(|| self.profile(profile))?;
+        p.knobs.iter().find(|k| k.index == index)
+    }
+
+    pub fn fader_of(&self, profile: &str, index: u8) -> Option<&FaderConfig> {
+        let p = self.supplier(profile, PageView::Page(0), None, ControlRef::Fader(index)).or_else(|| self.profile(profile))?;
+        p.faders.iter().find(|f| f.index == index)
+    }
+
+    pub fn roller_of(&self, profile: &str, side: Side) -> Option<&RollerConfig> {
+        let p = self.supplier(profile, PageView::Page(0), None, ControlRef::Roller(side)).or_else(|| self.profile(profile))?;
+        p.rollers.iter().find(|r| r.side == side)
+    }
+
+    /// Global LED colours with the overrides of `profile`'s bases (farthest first) and then of
+    /// `profile` applied per field.
+    pub fn leds_of(&self, profile: &str) -> Leds {
+        let mut leds = self.leds.clone();
+        let chain = self.profile(profile).into_iter().chain(self.bases(profile)).collect::<Vec<_>>();
+        for o in chain.iter().rev().filter_map(|p| p.leds.as_ref()) {
+            leds.base = o.base.or(leds.base);
+            leds.fader = o.fader.clone().or(leds.fader);
+            leds.knob = o.knob.clone().or(leds.knob);
+            leds.brightness = o.brightness.or(leds.brightness);
+            leds.knob_volume = o.knob_volume.or(leds.knob_volume);
+            leds.knob_mute_red = o.knob_mute_red.or(leds.knob_mute_red);
+        }
+        leds
     }
 }
 
@@ -1617,6 +1818,8 @@ mod tests {
         assert!(with("hold = 250", "hold = 250, tap = 1").is_err());
         assert!(with("wrap = true", "wrapp = true").is_err(), "unknown setup key");
         assert!(with("toast = true", "toast = 1").is_err());
+        // A manual setup keeps a fallback from when it followed apps (the app leaves it).
+        assert!(with("profiles = [\"Live\", \"Desktop\"]", "profiles = [\"Live\"]\nfallback = \"Desktop\"").is_ok());
     }
 
     /// Without `[[setup]]` the implicit setup picks exactly what `profile_for_app` picks.

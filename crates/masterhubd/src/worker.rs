@@ -49,9 +49,11 @@ struct Worker {
 impl Worker {
     fn run(&mut self, tx: Sender<DeviceCmd>, rx: Receiver<DeviceCmd>) -> Result<()> {
         let kind = self.dev.info.kind;
+        let mut needs_replug = false;
         if let Some(cmd) = FeatureCommand::sw_mode(kind, true)
             && self.dev.command(&cmd)?.is_empty()
         {
+            needs_replug = true;
             // Firmware quirk: hardware mode was entered earlier (e.g. by the vendor app on exit)
             // and the module refuses software mode until power-cycled.
             log::error!(
@@ -64,7 +66,7 @@ impl Worker {
         let firmware = self.dev.get_feature(kind.firmware_report()).ok().and_then(|r| parse_firmware_version(&r));
         log::info!("{} {} connected (fw {})", kind.name(), self.dev.info.serial, firmware.as_deref().unwrap_or("?"));
         self.controller
-            .send(Msg::Connected { info: self.dev.info.clone(), firmware, commands: tx })
+            .send(Msg::Connected { info: self.dev.info.clone(), firmware, commands: tx, needs_replug })
             .context("controller gone")?;
 
         let mut buf = [0u8; 64];

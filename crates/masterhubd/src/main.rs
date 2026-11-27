@@ -12,6 +12,8 @@ mod hid;
 mod ipc;
 mod keyboard;
 mod resume;
+mod setups;
+mod state;
 mod stats;
 mod surface;
 mod worker;
@@ -42,6 +44,10 @@ fn usage() -> String {
     format!(
         "usage: masterhubd [--config PATH] [--check] [--list]
        masterhubd claude-hook   (Claude Code hook, see docs/CLAUDE_CODE.md)
+       masterhubd ctl setup NAME|next|prev|pick
+       masterhubd ctl profile NAME|next|prev|pick
+       masterhubd ctl pin [toggle|release]
+                                (tell the running service, e.g. from a compositor keybind)
 
   --config PATH  config file (default: {DEFAULT_CONFIG})
   --check        validate the config and exit
@@ -54,6 +60,12 @@ Logging: RUST_LOG=debug masterhubd"
 fn main() -> Result<()> {
     if std::env::args().nth(1).as_deref() == Some("claude-hook") {
         claude::hook();
+        return Ok(());
+    }
+    if std::env::args().nth(1).as_deref() == Some("ctl") {
+        let args: Vec<String> = std::env::args().skip(2).collect();
+        let action = ctl_action(&args).with_context(usage)?;
+        masterhub_core::ipc::call_once(masterhub_core::ipc::Request::RunAction { action, value: None })?;
         return Ok(());
     }
     init_logging();
@@ -130,7 +142,7 @@ fn main() -> Result<()> {
         let path = path.clone();
         thread::Builder::new()
             .name("controller".into())
-            .spawn(move || Controller::new(config, text, path, actions, snapshot, events).run(ctl_rx))
+            .spawn(move || Controller::new(config, text, path, actions, snapshot, events, state::default_path()).run(ctl_rx))
             .context("spawning controller")?;
     }
     focus::spawn(ctl_tx.clone());
@@ -168,6 +180,19 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// The action a `masterhubd ctl …` command line asks for.
+fn ctl_action(args: &[String]) -> Result<config::Action> {
+    use config::{Action, PinAction};
+    let arg = |i: usize| args.get(i).map(String::as_str);
+    Ok(match (arg(0), arg(1)) {
+        (Some("setup"), Some(name)) => Action::Setup(name.to_owned()),
+        (Some("profile"), Some(name)) => Action::Profile(name.to_owned()),
+        (Some("pin"), None | Some("toggle")) => Action::Pin(PinAction::Toggle),
+        (Some("pin"), Some("release")) => Action::Pin(PinAction::Release),
+        _ => bail!("unknown ctl command {:?}", args.join(" ")),
+    })
+}
+
 /// Log to stderr, or on Windows without a console (started at login) to
 /// `%LOCALAPPDATA%\openmasterhub\masterhubd.log` (see `open_log`).
 fn init_logging() {
@@ -199,4 +224,19 @@ fn open_log(dir: &std::path::Path) -> std::io::Result<std::fs::File> {
         let _ = std::fs::rename(&log, dir.join("masterhubd.old.log"));
     }
     std::fs::OpenOptions::new().create(true).append(true).open(log)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn ctl_commands() {
+        use masterhub_core::config::{Action, PinAction};
+        let a = |s: &str| super::ctl_action(&s.split_whitespace().map(str::to_owned).collect::<Vec<_>>()).ok();
+        assert_eq!(a("setup Stream"), Some(Action::Setup("Stream".into())));
+        assert_eq!(a("profile next"), Some(Action::Profile("next".into())));
+        assert_eq!(a("pin"), Some(Action::Pin(PinAction::Toggle)));
+        assert_eq!(a("pin release"), Some(Action::Pin(PinAction::Release)));
+        assert_eq!(a("setup"), None);
+        assert_eq!(a("reboot now"), None);
+    }
 }

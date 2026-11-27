@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use base64::Engine;
 use masterhub_core::config::{self, Config, Face, Widget};
 use masterhub_core::ipc::{Client, ClientEvent, DisplayImage, Event, HubState, ModuleState, SessionInfo, Status};
-use masterhub_core::render::{KEY_SIZE, LiveData, Picture, Renderer, load_picture};
+use masterhub_core::render::{KEY_SIZE, LiveData, Picture, Renderer, load_picture_as};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -108,7 +108,19 @@ fn set_setup(state: State<AppState>, name: String) -> Result<(), String> {
 /// End any client's claim (services with capability `release_claim`).
 #[tauri::command]
 fn release_claim(state: State<AppState>, claim: u64) -> Result<(), String> {
-    state.client.call(masterhub_core::ipc::Request::ReleaseClaim { claim }).map(|_| ()).map_err(err)
+    state.client.release_claim(claim).map_err(err)
+}
+
+/// Hybrid setups: pin a profile, the live one without `name` (capability `pin`).
+#[tauri::command]
+fn pin_profile(state: State<AppState>, name: Option<String>) -> Result<(), String> {
+    state.client.pin(name.as_deref()).map_err(err)
+}
+
+/// End the hybrid pin (capability `pin`).
+#[tauri::command]
+fn release_pin(state: State<AppState>) -> Result<(), String> {
+    state.client.release_pin().map_err(err)
 }
 
 /// A Claude Code session as the Integrations page lists it.
@@ -133,7 +145,7 @@ fn show_page(state: State<AppState>, name: String) -> Result<(), String> {
 /// Render a key face locally with placeholder data for live widgets.
 #[tauri::command]
 fn preview_face(state: State<AppState>, face: Face) -> Result<String, String> {
-    let picture = face.image.as_ref().and_then(|p| load_picture(p, KEY_SIZE).ok());
+    let picture = face.image.as_ref().and_then(|p| load_picture_as(p, KEY_SIZE, face.fit.unwrap_or_default()).ok());
     let frame = picture.as_ref().map(|p| match p {
         Picture::Still(i) => i,
         Picture::Animated(f) => &f[0].0,
@@ -255,6 +267,7 @@ fn forward_events(app: AppHandle, rx: std::sync::mpsc::Receiver<ClientEvent>) {
                     if ours { Ok(()) } else { app.emit("hub:config-changed", ()) }
                 }
                 ClientEvent::Event(Event::Claim(c)) => app.emit("hub:claim", c),
+                ClientEvent::Event(Event::Claims(c)) => app.emit("hub:claims", c),
                 ClientEvent::Event(Event::Sessions(s)) => app.emit("hub:sessions", s),
             };
             if let Err(e) = r {
@@ -319,6 +332,8 @@ pub fn run() {
             show_page,
             set_setup,
             release_claim,
+            pin_profile,
+            release_pin,
             claude_sessions,
             preview_face,
             open_window_classes,

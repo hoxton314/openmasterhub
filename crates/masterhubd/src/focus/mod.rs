@@ -21,6 +21,43 @@ pub fn raise(pid: u32, title: Option<&str>) -> anyhow::Result<()> {
     if hyprland::running() { hyprland::raise(pid, title) } else { kde::raise(pid, title) }
 }
 
+/// How the focused window is found (`get_system_info`), if any backend applies.
+#[cfg(target_os = "linux")]
+pub fn backend() -> Option<&'static str> {
+    if hyprland::running() {
+        return Some("hyprland");
+    }
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    desktop.split(':').any(|d| d.eq_ignore_ascii_case("kde")).then_some("kwin")
+}
+
+#[cfg(windows)]
+pub fn backend() -> Option<&'static str> {
+    Some("win32")
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+pub fn backend() -> Option<&'static str> {
+    None
+}
+
+/// Name of a running program, for the claim list.
+#[cfg(target_os = "linux")]
+pub fn program_name(pid: u32) -> Option<String> {
+    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    Some(comm.trim().to_owned()).filter(|c| !c.is_empty())
+}
+
+#[cfg(windows)]
+pub fn program_name(pid: u32) -> Option<String> {
+    exe_name(pid)
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+pub fn program_name(_pid: u32) -> Option<String> {
+    None
+}
+
 /// Window classes of the open windows, from whichever desktop is running.
 #[cfg(target_os = "linux")]
 fn window_classes() -> anyhow::Result<Vec<String>> {

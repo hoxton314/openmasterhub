@@ -34,11 +34,13 @@
 //! | `preview_profile` | `name`, `secs` | show a profile on the hub for a while (capability `preview_profile`) |
 //! | `release_claim` | `claim` | end another client's claim (capability `release_claim`) |
 //! | `get_system_info` | | [`SystemInfo`] (capability `system_info`) |
+//! | `get_claims` | | every claim, `Vec<ClaimState>` (also the `claims` event; capability `claim_details`) |
 //!
 //! Services without a capability answer its requests with an error; services older than
 //! `get_capabilities` answer that with an error too, which clients treat as an empty list.
 //!
-//! Events: `input`, `state`, `modules`, `display`, `config_changed`, `claim`, `sessions`.
+//! Events: `input`, `state`, `modules`, `display`, `config_changed`, `claim`, `claims` (the whole
+//! list, when a claim is added or removed), `sessions`.
 //!
 //! ## Live surface
 //!
@@ -316,6 +318,9 @@ pub enum Request {
         apps: Vec<String>,
         #[serde(default)]
         priority: i32,
+        /// The claiming program's name, for the claim list (else taken from its process).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        program: Option<String>,
     },
     Release { claim: u64 },
     /// Key and dial screen backlight, 0..=100, or `None` for the config's level. Ends with
@@ -355,6 +360,8 @@ pub enum Request {
     /// End any client's claim (admin; the claim list in the app).
     ReleaseClaim { claim: u64 },
     GetSystemInfo,
+    /// Every claim, `Vec<ClaimState>`.
+    GetClaims,
 }
 
 /// Suggestions for the targets of volume and mute actions.
@@ -384,6 +391,8 @@ pub enum Event {
     Display(DisplayImage),
     ConfigChanged,
     Claim(ClaimState),
+    /// Every claim, sent when one is added or removed (a removed claim is missing from it).
+    Claims(Vec<ClaimState>),
     /// The open Claude Code sessions changed (see `get_sessions`).
     Sessions(Vec<SessionInfo>),
 }
@@ -605,6 +614,29 @@ impl Client {
     pub fn set_setup(&self, name: &str) -> Result<()> {
         self.call(Request::SetSetup { name: name.to_owned() }).map(|_| ())
     }
+    /// Hybrid setups: pin `profile`, or the live one.
+    pub fn pin(&self, profile: Option<&str>) -> Result<()> {
+        self.call(Request::Pin { profile: profile.map(str::to_owned) }).map(|_| ())
+    }
+    pub fn release_pin(&self) -> Result<()> {
+        self.call(Request::ReleasePin).map(|_| ())
+    }
+    pub fn identify(&self, serial: &str) -> Result<()> {
+        self.call(Request::Identify { serial: serial.to_owned() }).map(|_| ())
+    }
+    pub fn preview_profile(&self, name: &str, secs: u32) -> Result<()> {
+        self.call(Request::PreviewProfile { name: name.to_owned(), secs }).map(|_| ())
+    }
+    pub fn release_claim(&self, claim: u64) -> Result<()> {
+        self.call(Request::ReleaseClaim { claim }).map(|_| ())
+    }
+    pub fn system_info(&self) -> Result<SystemInfo> {
+        self.get(Request::GetSystemInfo)
+    }
+    /// Every claim; empty for services that predate the request.
+    pub fn claims(&self) -> Vec<ClaimState> {
+        self.get(Request::GetClaims).unwrap_or_default()
+    }
 }
 
 #[cfg(test)]
@@ -685,5 +717,9 @@ mod tests {
         assert_eq!(r.request, Request::Pin { profile: None });
         let r: RequestMsg = serde_json::from_str(r#"{"id":2,"method":"set_setup","params":{"name":"Play"}}"#).unwrap();
         assert_eq!(r.request, Request::SetSetup { name: "Play".into() });
+        // Old clients' claims parse; the claim list is an event of its own.
+        let r: RequestMsg = serde_json::from_str(r#"{"id":3,"method":"claim","params":{"name":"x","controls":{"dial":true}}}"#).unwrap();
+        assert!(matches!(r.request, Request::Claim { program: None, priority: 0, .. }));
+        assert_eq!(serde_json::to_string(&Event::Claims(vec![])).unwrap(), r#"{"event":"claims","data":[]}"#);
     }
 }

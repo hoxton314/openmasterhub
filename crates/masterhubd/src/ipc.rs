@@ -15,7 +15,7 @@ use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::{ListenerOptions, SendHalf, Stream};
 use masterhub_core::config::Config;
 use masterhub_core::ipc::{
-    DisplayImage, Event, Request, RequestMsg, Response, ServerMsg, TARGET_DIAL, capability, socket_name, write_line,
+    DisplayImage, Event, Request, RequestMsg, Response, ServerMsg, SystemInfo, TARGET_DIAL, capability, socket_name, write_line,
 };
 use serde::Serialize;
 
@@ -85,6 +85,11 @@ pub fn serve(controller: Sender<Msg>, snapshot: Arc<Mutex<Snapshot>>, broadcaste
 }
 
 fn client(stream: Stream, controller: Sender<Msg>, snapshot: Arc<Mutex<Snapshot>>, broadcaster: Arc<Broadcaster>) {
+    // The client's process, for the claim list.
+    // `pid_t` on Unix, already `u32` on Windows.
+    #[allow(clippy::useless_conversion)]
+    let pid = stream.peer_creds().ok().and_then(|c| c.pid()).and_then(|p| u32::try_from(p).ok());
+    let peer = Peer { pid, program: pid.and_then(crate::focus::program_name) };
     let (recv, send) = stream.split();
     let send = Arc::new(Mutex::new(send));
     broadcaster.add(send.clone());
@@ -94,7 +99,7 @@ fn client(stream: Stream, controller: Sender<Msg>, snapshot: Arc<Mutex<Snapshot>
     for line in BufReader::new(recv).lines() {
         let Ok(line) = line else { break };
         let response = match serde_json::from_str::<RequestMsg>(&line) {
-            Ok(RequestMsg { id, request }) => match handle(request, &controller, &snapshot, &mut claims) {
+            Ok(RequestMsg { id, request }) => match handle(request, &controller, &snapshot, &mut claims, &peer) {
                 Ok(result) => Response { id, result: Some(result), error: None },
                 Err(e) => Response { id, result: None, error: Some(format!("{e:#}")) },
             },
@@ -110,22 +115,39 @@ fn client(stream: Stream, controller: Sender<Msg>, snapshot: Arc<Mutex<Snapshot>
     log::debug!("app disconnected");
 }
 
+/// The process at the other end of a connection.
+struct Peer {
+    pid: Option<u32>,
+    program: Option<String>,
+}
+
 /// What this service implements beyond the 0.8 baseline (`get_capabilities`). Add a name here
 /// when its behaviour lands; the app hides the controls of missing ones.
 pub const CAPABILITIES: &[&str] = &[
+    capability::SETUPS,
+    capability::BASE,
     // `keys = { combo, hold }` runs as `combo@hold`.
     capability::HOLD,
+    capability::LONG_PRESS,
+    capability::SETUP_ACTION,
+    capability::PROFILE_CYCLE,
+    capability::PIN,
+    capability::EXCEPT_SETUPS,
+    capability::BLINK_ON_SETUP,
+    capability::FACE_FIT,
+    capability::WIDGET_REFRESH,
+    capability::IDENTIFY,
+    capability::NEEDS_REPLUG,
+    capability::SYSTEM_INFO,
+    capability::PREVIEW_PROFILE,
+    capability::RELEASE_CLAIM,
+    capability::CLAIM_DETAILS,
 ];
 
 /// Live-surface claim ids, unique for the service's lifetime.
 static NEXT_CLAIM: AtomicU64 = AtomicU64::new(1);
 /// Largest frame accepted (a 240×240 JPEG at high quality is ~30 KB).
 const MAX_FRAME: usize = 256 * 1024;
-
-/// The wire name of a request, e.g. `set_setup`.
-fn method(request: &Request) -> String {
-    serde_json::to_value(request).ok().and_then(|v| v.get("method")?.as_str().map(str::to_owned)).unwrap_or_default()
-}
 
 fn json<T: Serialize>(v: T) -> Result<serde_json::Value> {
     Ok(serde_json::to_value(v)?)
@@ -136,6 +158,7 @@ fn handle(
     controller: &Sender<Msg>,
     snapshot: &Mutex<Snapshot>,
     claims: &mut Vec<u64>,
+    peer: &Peer,
 ) -> Result<serde_json::Value> {
     let own = |claim: u64| if claims.contains(&claim) { Ok(()) } else { Err(anyhow::anyhow!("no claim {claim} on this connection")) };
     match request {
@@ -188,7 +211,7 @@ fn handle(
             json(serde_json::json!({ "level": level, "muted": muted }))
         }
         Request::GetSessions => json(&snapshot.lock().unwrap().sessions),
-        Request::Claim { name, controls, apps, priority } => {
+        Request::Claim { name, controls, apps, priority, program } => {
             if controls.is_empty() {
                 bail!("claim names no controls");
             }
@@ -201,7 +224,8 @@ fn handle(
             }
             let claim = NEXT_CLAIM.fetch_add(1, Ordering::Relaxed);
             claims.push(claim);
-            controller.send(Msg::Claim { claim, name, controls, apps, priority })?;
+            let program = program.or_else(|| peer.program.clone());
+            controller.send(Msg::Claim { claim, name, controls, apps, priority, pid: peer.pid, program })?;
             json(serde_json::json!({ "claim": claim }))
         }
         Request::RunAction { action, value } => {
@@ -242,13 +266,62 @@ fn handle(
             json(())
         }
         Request::GetCapabilities => json(CAPABILITIES),
-        Request::SetSetup { .. }
-        | Request::Pin { .. }
-        | Request::ReleasePin
-        | Request::Identify { .. }
-        | Request::PreviewProfile { .. }
-        | Request::ReleaseClaim { .. }
-        | Request::GetSystemInfo => bail!("{} is not supported by this masterhubd", method(&request)),
+        Request::SetSetup { name } => {
+            if !snapshot.lock().unwrap().config.effective_setups().iter().any(|s| s.name == name) {
+                bail!("no setup {name:?}");
+            }
+            controller.send(Msg::SetSetup(name))?;
+            json(())
+        }
+        Request::Pin { profile } => {
+            {
+                let snap = snapshot.lock().unwrap();
+                if let Some(p) = &profile
+                    && snap.config.profile(p).is_none()
+                {
+                    bail!("no profile {p:?}");
+                }
+                let active = snap.state.setup.as_deref().and_then(|n| snap.config.effective_setups().into_iter().find(|s| s.name == n));
+                if active.is_none_or(|s| s.mode() != masterhub_core::config::SetupMode::Hybrid) {
+                    bail!("the active setup is not hybrid; only hybrid setups pin profiles");
+                }
+            }
+            controller.send(Msg::Pin(profile))?;
+            json(())
+        }
+        Request::ReleasePin => {
+            controller.send(Msg::ReleasePin)?;
+            json(())
+        }
+        Request::Identify { serial } => {
+            let kind = snapshot.lock().unwrap().modules.iter().find(|m| m.serial == serial).map(|m| m.kind.clone());
+            match kind.as_deref() {
+                None => bail!("no module {serial:?}"),
+                Some("roller") => bail!("the roller has no screen or lights to flash"),
+                Some(_) => controller.send(Msg::Identify(serial))?,
+            }
+            json(())
+        }
+        Request::PreviewProfile { name, secs } => {
+            if snapshot.lock().unwrap().config.profile(&name).is_none() {
+                bail!("no profile {name:?}");
+            }
+            controller.send(Msg::Preview { name, secs })?;
+            json(())
+        }
+        Request::ReleaseClaim { claim } => {
+            if !snapshot.lock().unwrap().claims.iter().any(|c| c.claim == claim) {
+                bail!("no claim {claim}");
+            }
+            controller.send(Msg::Release { claim })?;
+            json(())
+        }
+        Request::GetSystemInfo => json(SystemInfo {
+            platform: std::env::consts::OS.to_owned(),
+            focus_backend: crate::focus::backend().map(str::to_owned),
+            version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+        }),
+        Request::GetClaims => json(&snapshot.lock().unwrap().claims),
     }
 }
 
@@ -267,7 +340,5 @@ mod tests {
             capability::CLAIM_DETAILS,
         ];
         assert!(CAPABILITIES.iter().all(|c| known.contains(c)));
-        assert_eq!(method(&Request::SetSetup { name: "x".into() }), "set_setup");
-        assert_eq!(method(&Request::ReleasePin), "release_pin");
     }
 }

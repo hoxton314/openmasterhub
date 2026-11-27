@@ -10,12 +10,15 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use masterhub_core::config::{Action, AudioTarget, Color, Config, Face, Leds, Page, SessionSort, Side, Widget};
+use masterhub_core::config::{
+    Action, AudioTarget, Color, Config, Face, ImageFit, Leds, Page, PageView, PinAction, SessionSort, Setup, SetupMode, Side,
+    Widget,
+};
 use masterhub_core::ipc::{
-    ClaimState, Controls, DisplayImage, Event, GUI_APP_ID, HubState, InputMsg, LedZone, ModuleState, Status, TARGET_DIAL,
+    ClaimState, Controls, DisplayImage, Event, GUI_APP_ID, HubState, InputMsg, LedZone, ModuleState, Reason, Status, TARGET_DIAL,
 };
 use masterhub_core::layout;
-use masterhub_core::render::{DIAL_SIZE, KEY_SIZE, LiveData, Picture, Renderer, load_picture};
+use masterhub_core::render::{DIAL_SIZE, KEY_SIZE, LiveData, Picture, Renderer, load_picture_as};
 use masterhub_proto::{
     ImageTarget, InputReport, KEY_COUNT, KeyTracker, LedMode, LedTarget, ModuleKind, Rgb, Roll, Rotation,
     led_brightness, led_color, led_mode,
@@ -26,12 +29,15 @@ use crate::claude::SessionFile;
 use crate::claude::desktop::View;
 use crate::ipc::Broadcaster;
 use crate::hid::ModuleInfo;
+use crate::setups::{self, Engine, Pin};
+use crate::state::State;
 use crate::stats::Stats;
 use crate::surface::{Claim, Claims, Control, LedState};
 use crate::worker::DeviceCmd;
 
 pub enum Msg {
-    Connected { info: ModuleInfo, firmware: Option<String>, commands: Sender<DeviceCmd> },
+    /// `needs_replug`: it ignored the switch to software mode (firmware quirk).
+    Connected { info: ModuleInfo, firmware: Option<String>, commands: Sender<DeviceCmd>, needs_replug: bool },
     Disconnected { serial: String },
     Input { serial: String, report: InputReport },
     ActiveApp(String),
@@ -43,6 +49,14 @@ pub enum Msg {
     ApplyConfig { config: Box<Config>, text: String },
     SetProfile(String),
     ShowPage(String),
+    SetSetup(String),
+    /// Pin a profile (the live one when `None`) in the active hybrid setup.
+    Pin(Option<String>),
+    ReleasePin,
+    /// Flash a module so the user can find it.
+    Identify(String),
+    /// Show a profile for `secs`, then go back.
+    Preview { name: String, secs: u32 },
     /// A tool's status for the Base LED; `None` forgets the source. `background`: from work in
     /// the background of the source (see [`reported_status`]).
     SetStatus {
@@ -53,7 +67,7 @@ pub enum Msg {
         detail: Option<masterhub_core::ipc::SessionDetail>,
     },
     /// Live surface (see [`crate::surface`]).
-    Claim { claim: u64, name: String, controls: Controls, apps: Vec<String>, priority: i32 },
+    Claim { claim: u64, name: String, controls: Controls, apps: Vec<String>, priority: i32, pid: Option<u32>, program: Option<String> },
     Release { claim: u64 },
     Backlight { claim: u64, level: Option<u8> },
     /// An action from a client (`run_action`).
@@ -72,6 +86,7 @@ pub struct Snapshot {
     pub state: HubState,
     pub displays: BTreeMap<(String, u8), Arc<Vec<u8>>>,
     pub sessions: Vec<masterhub_core::ipc::SessionInfo>,
+    pub claims: Vec<ClaimState>,
 }
 
 struct Module {
@@ -85,6 +100,36 @@ struct Module {
     shown: HashMap<u8, Arc<Vec<u8>>>,
     /// Where the module sits on the Base, once the Base is known.
     placement: Option<layout::Placement>,
+    needs_replug: bool,
+}
+
+/// The dial picker (`profile = "pick"`, `setup = "pick"`): turn to choose, press to switch.
+struct Picker {
+    setups: bool,
+    items: Vec<String>,
+    index: usize,
+    until: Instant,
+}
+
+/// The dial held down while it has a `long_press` action.
+struct DialHold {
+    since: Instant,
+    fired: bool,
+}
+
+/// A module flashing for `identify`.
+struct Identify {
+    serial: String,
+    step: u8,
+    due: Instant,
+}
+
+/// `preview_profile`: the profile to go back to.
+struct Preview {
+    shown: usize,
+    back: usize,
+    reason: Option<Reason>,
+    until: Instant,
 }
 
 struct Anim {
@@ -126,7 +171,7 @@ pub struct Controller {
     config_path: PathBuf,
     config_mtime: Option<SystemTime>,
     renderer: Renderer,
-    pictures: HashMap<(PathBuf, u32), Option<Rc<Picture>>>,
+    pictures: HashMap<(PathBuf, u32, ImageFit), Option<Rc<Picture>>>,
     modules: BTreeMap<String, Module>,
     profile: usize,
     /// The profile shown before the current one, for `back` outside a folder.
@@ -166,7 +211,38 @@ pub struct Controller {
     display_pending: BTreeMap<(String, u8), Arc<Vec<u8>>>,
     /// A client's backlight level and its claim; the config's level otherwise.
     backlight: Option<(u64, u8)>,
+    /// Active setup, manual choices and the hybrid pin.
+    engine: Engine,
+    /// Why the live profile is live.
+    reason: Option<Reason>,
+    /// `state.json` (none in tests).
+    state_path: Option<PathBuf>,
+    /// A dial card shown until the instant.
+    card: Option<(LiveData, Instant)>,
+    picker: Option<Picker>,
+    dial_hold: Option<DialHold>,
+    /// The picker took the dial press; its release does nothing either.
+    swallow_dial_up: bool,
+    /// The Base LED blinking on a setup change: colour, step, next step.
+    setup_blink: Option<(Rgb, u8, Instant)>,
+    identify: Option<Identify>,
+    preview: Option<Preview>,
+    /// When each widget was last sampled (`refresh`).
+    sampled: HashMap<Widget, Instant>,
 }
+
+/// Held this long, the dial runs its `long_press` action.
+const LONG_PRESS: Duration = Duration::from_millis(600);
+/// Dial cards on a profile and on a setup change.
+const PROFILE_CARD: Duration = Duration::from_millis(1500);
+const SETUP_CARD: Duration = Duration::from_secs(2);
+/// The dial picker closes when left alone this long.
+const PICKER_IDLE: Duration = Duration::from_secs(10);
+/// One on or off phase of the setup blink (twice on, twice off).
+const SETUP_BLINK: Duration = Duration::from_millis(180);
+/// One phase of the identify flash, and how many.
+const IDENTIFY_PHASE: Duration = Duration::from_millis(250);
+const IDENTIFY_STEPS: u8 = 8;
 
 const DISPLAY_EVERY: Duration = Duration::from_millis(100);
 
@@ -185,6 +261,7 @@ impl Controller {
         actions: Sender<Request>,
         snapshot: Arc<Mutex<Snapshot>>,
         events: Arc<Broadcaster>,
+        state_path: Option<PathBuf>,
     ) -> Self {
         {
             let mut s = snapshot.lock().unwrap();
@@ -199,7 +276,8 @@ impl Controller {
                  (set orientation in the config to pin it)"
             );
         }
-        let c = Self {
+        let engine = Engine::from_state(&state_path.as_deref().map(State::load).unwrap_or_default());
+        let mut c = Self {
             renderer: Renderer::new(config.font.as_deref()),
             config_mtime: mtime(&config_path),
             config,
@@ -231,7 +309,24 @@ impl Controller {
             display_sent: HashMap::new(),
             display_pending: BTreeMap::new(),
             backlight: None,
+            engine,
+            reason: None,
+            state_path,
+            card: None,
+            picker: None,
+            dial_hold: None,
+            swallow_dial_up: false,
+            setup_blink: None,
+            identify: None,
+            preview: None,
+            sampled: HashMap::new(),
         };
+        // Nothing focused yet: the fallback (the first profile of a legacy config), or the
+        // manual setup's choice.
+        if let Some((name, reason)) = c.engine.decide(&c.config, None) {
+            c.profile = c.index_of(&name).unwrap_or(0);
+            c.reason = Some(reason);
+        }
         c.publish_state();
         c
     }
@@ -240,7 +335,7 @@ impl Controller {
         let mut next_tick = Instant::now();
         loop {
             let now = Instant::now();
-            let next_anim = self.anims.values().map(|a| a.due).chain(self.blink_due).min();
+            let next_anim = self.anims.values().map(|a| a.due).chain(self.blink_due).chain(self.next_timer()).min();
             let deadline = next_anim.map_or(next_tick, |a| a.min(next_tick));
             match rx.recv_timeout(deadline.saturating_duration_since(now)) {
                 Ok(msg) => self.handle(msg),
@@ -252,6 +347,7 @@ impl Controller {
                 next_tick = now + TICK;
                 self.ticks = self.ticks.wrapping_add(1);
                 self.check_config_file();
+                self.check_pin_and_preview(now);
                 self.prune_statuses();
                 self.sample_widgets();
                 self.refresh_all();
@@ -259,12 +355,13 @@ impl Controller {
             }
             self.advance_animations(now);
             self.advance_blink(now);
+            self.advance_timers(now);
         }
     }
 
     fn handle(&mut self, msg: Msg) {
         match msg {
-            Msg::Connected { info, firmware, commands } => {
+            Msg::Connected { info, firmware, commands, needs_replug } => {
                 let serial = info.serial.clone();
                 self.modules.insert(
                     serial.clone(),
@@ -277,6 +374,7 @@ impl Controller {
                         faders: None,
                         shown: HashMap::new(),
                         placement: None,
+                        needs_replug,
                     },
                 );
                 self.init_module(&serial);
@@ -301,26 +399,40 @@ impl Controller {
             // The GUI's own window: GTK uses the app ID, Tauri the binary name (openmasterhub[.exe]).
             Msg::ActiveApp(class) if class == GUI_APP_ID || class.to_ascii_lowercase().starts_with("openmasterhub") => {}
             Msg::ActiveApp(class) => {
-                let target = self.config.profile_for_app(&class);
                 self.active_app = Some(class);
                 self.reclaim();
-                if target != self.profile {
-                    log::info!("focused {:?}: profile {:?}", self.active_app, self.config.profiles[target].name);
-                    self.switch_profile(target);
-                } else {
-                    self.publish_state();
-                }
+                self.follow_focus();
             }
             Msg::ApplyConfig { config, text } => {
                 self.config_mtime = mtime(&self.config_path);
                 self.apply_config(*config, text);
             }
             Msg::SetProfile(name) => {
-                if let Some(i) = self.config.profiles.iter().position(|p| p.name == name) {
-                    self.switch_profile(i);
+                if let Some(i) = self.index_of(&name) {
+                    self.choose(i, Reason::Manual);
                 }
             }
             Msg::ShowPage(name) => self.show_page(&name),
+            Msg::SetSetup(name) => self.set_setup(&name),
+            Msg::Pin(profile) => {
+                let i = match profile {
+                    Some(name) => self.index_of(&name),
+                    None => Some(self.profile),
+                };
+                if let Some(i) = i {
+                    self.pin(i);
+                }
+            }
+            Msg::ReleasePin => self.release_pin(),
+            Msg::Identify(serial) => self.start_identify(serial),
+            Msg::Preview { name, secs } => {
+                let Some(i) = self.index_of(&name) else { return };
+                let back = self.preview.take().map_or((self.profile, self.reason.clone()), |p| (p.back, p.reason));
+                self.reason = Some(Reason::Action);
+                self.switch_profile(i);
+                let until = Instant::now() + Duration::from_secs(u64::from(secs.clamp(1, 300)));
+                self.preview = Some(Preview { shown: i, back: back.0, reason: back.1, until });
+            }
             Msg::SetStatus { source, status, pid, background, detail } => {
                 log::debug!("status {source}: {status:?}{}", if background { " (background)" } else { "" });
                 match status {
@@ -344,13 +456,14 @@ impl Controller {
                 self.refresh_sessions();
                 self.publish_sessions();
             }
-            Msg::Claim { claim, name, controls, apps, priority } => {
+            Msg::Claim { claim, name, controls, apps, priority, pid, program } => {
                 log::info!("{name} claims {controls:?} (apps {apps:?}, priority {priority}) as #{claim}");
                 let controls = crate::surface::expand(&controls);
-                let c = Claim { name, controls, apps, priority, frames: HashMap::new(), leds: HashMap::new() };
+                let c = Claim { name, controls, apps, priority, pid, program, frames: HashMap::new(), leds: HashMap::new() };
                 self.claims.insert(claim, c);
                 self.reclaim();
                 self.publish_claim(claim);
+                self.publish_claim_list();
             }
             Msg::Backlight { claim, level } => {
                 self.backlight = level.map(|l| (claim, l.min(100)));
@@ -364,6 +477,7 @@ impl Controller {
                 if self.claims.remove(claim) {
                     log::info!("claim #{claim} released");
                     self.reclaim();
+                    self.publish_claim_list();
                 }
             }
             Msg::RunAction { action, value } => self.run_action(action, value, None),
@@ -439,10 +553,10 @@ impl Controller {
         }
     }
 
-    fn publish_claim(&self, claim: u64) {
-        let Some(c) = self.claims.get(claim) else { return };
+    fn claim_state(&self, claim: u64) -> Option<ClaimState> {
+        let c = self.claims.get(claim)?;
         let turn = |kind| self.serials_of(kind).first().map_or(0, |s| self.turn_for(s));
-        self.events.send(Event::Claim(ClaimState {
+        Some(ClaimState {
             claim,
             name: c.name.clone(),
             active: self.claims.is_active(claim),
@@ -451,9 +565,28 @@ impl Controller {
             dial_turn: turn(ModuleKind::Dial),
             priority: Some(c.priority),
             apps: c.apps.clone(),
-            pid: None,
-            program: None,
-        }));
+            pid: c.pid,
+            program: c.program.clone(),
+        })
+    }
+
+    fn publish_claim(&self, claim: u64) {
+        let Some(state) = self.claim_state(claim) else { return };
+        {
+            let mut snap = self.snapshot.lock().unwrap();
+            match snap.claims.iter_mut().find(|c| c.claim == claim) {
+                Some(c) => *c = state.clone(),
+                None => snap.claims.push(state.clone()),
+            }
+        }
+        self.events.send(Event::Claim(state));
+    }
+
+    /// Every claim, after one was added or removed (`claims` event, `get_claims`).
+    fn publish_claim_list(&self) {
+        let list: Vec<ClaimState> = self.claims.ids().filter_map(|id| self.claim_state(id)).collect();
+        self.snapshot.lock().unwrap().claims = list.clone();
+        self.events.send(Event::Claims(list));
     }
 
     fn publish_claims(&self) {
@@ -537,12 +670,50 @@ impl Controller {
         if config.font != self.config.font {
             self.renderer = Renderer::new(config.font.as_deref());
         }
+        let mut old_setup = self.engine.active(&self.config).name;
+        let old_setups: Vec<String> = self.config.effective_setups().into_iter().map(|s| s.name).collect();
         self.config = config;
+        // The active setup renamed (same place, a name that is new): keep it active.
+        let new_setups: Vec<String> = self.config.effective_setups().into_iter().map(|s| s.name).collect();
+        if !new_setups.contains(&old_setup)
+            && old_setups.len() == new_setups.len()
+            && let Some(i) = old_setups.iter().position(|n| *n == old_setup)
+            && !old_setups.contains(&new_setups[i])
+        {
+            log::info!("setup {old_setup:?} renamed to {:?}", new_setups[i]);
+            self.engine.setup = Some(new_setups[i].clone());
+            if let Some(choice) = self.engine.manual.remove(&old_setup) {
+                self.engine.manual.insert(new_setups[i].clone(), choice);
+            }
+            if let Some(p) = self.engine.pin.as_mut() {
+                p.setup = new_setups[i].clone();
+            }
+            self.save_state();
+            old_setup = new_setups[i].clone();
+        }
+        self.engine.sync(&self.config);
         self.update_status();
         self.pictures.clear();
         self.anims.clear();
-        // Keep the user where they were if that still exists.
-        self.profile = old_profile.and_then(|n| self.config.profiles.iter().position(|p| p.name == n)).unwrap_or(0);
+        self.picker = None;
+        self.preview = None;
+        // Keep the user where they were if that still exists (and the setup does); else what
+        // the setup picks with nothing focused (the first profile of a legacy config).
+        let setup_gone = self.engine.active(&self.config).name != old_setup;
+        let kept = old_profile.and_then(|n| self.index_of(&n)).filter(|_| !setup_gone);
+        self.profile = match kept {
+            Some(i) => i,
+            None => {
+                let app = if setup_gone { self.active_app.clone() } else { None };
+                match self.engine.decide(&self.config, app.as_deref()) {
+                    Some((name, reason)) => {
+                        self.reason = Some(reason);
+                        self.index_of(&name).unwrap_or(0)
+                    }
+                    None => 0,
+                }
+            }
+        };
         self.previous_profile = None;
         let pages = self.profile_ref().map(|p| p.pages.as_slice()).unwrap_or_default();
         self.page = old_page.and_then(|n| pages.iter().position(|p| p.name == n)).unwrap_or(0);
@@ -580,9 +751,410 @@ impl Controller {
         }
     }
 
-    /// The key at `index` on screen: pinned, or the page's own.
+    /// The keypad page on screen, for base fall-through.
+    fn view(&self) -> PageView<'_> {
+        match self.folders.last() {
+            Some(f) => PageView::Folder(f),
+            None => PageView::Page(self.page),
+        }
+    }
+
+    /// The key at `index` on screen: pinned, the page's own, or inherited from a base.
     fn key_ref(&self, index: u8) -> Option<&masterhub_core::config::KeyConfig> {
-        self.config.key(self.profile_name()?, self.page_ref()?, index)
+        let setup = self.active_setup().name;
+        self.config.key_at(self.profile_name()?, self.view(), Some(&setup), index)
+    }
+
+    fn index_of(&self, name: &str) -> Option<usize> {
+        self.config.profiles.iter().position(|p| p.name == name)
+    }
+
+    fn active_setup(&self) -> Setup {
+        self.engine.active(&self.config)
+    }
+
+    fn save_state(&self) {
+        let Some(path) = &self.state_path else { return };
+        if let Err(e) = self.engine.state().save(path) {
+            log::warn!("saving {}: {e:#}", path.display());
+        }
+    }
+
+    // ───────────────────────────── setups ─────────────────────────────
+
+    /// The focused app changed: let the active setup pick (follow, hybrid without a pin).
+    fn follow_focus(&mut self) {
+        let setup = self.active_setup();
+        if setup.mode() == SetupMode::Manual {
+            return self.publish_state();
+        }
+        if self.engine.focus_releases(&self.config, self.active_app.as_deref()) {
+            log::info!("focus changed: pin released");
+            self.engine.pin = None;
+        }
+        if self.engine.pin_of(&setup).is_some() {
+            return self.publish_state();
+        }
+        self.apply_decision(true);
+    }
+
+    /// Show what the active setup picks now. `card`: a dial card if the profile changes.
+    fn apply_decision(&mut self, card: bool) {
+        let Some((name, reason)) = self.engine.decide(&self.config, self.active_app.as_deref()) else {
+            return self.publish_state();
+        };
+        let Some(target) = self.index_of(&name) else { return };
+        self.reason = Some(reason);
+        if target != self.profile {
+            log::info!("focused {:?}: profile {name:?}", self.active_app);
+            self.switch_profile(target);
+            if card {
+                self.profile_card();
+            }
+        } else {
+            self.publish_state();
+        }
+    }
+
+    /// Make a profile live by hand (`set_profile`, the picker) or by an action: follow setups
+    /// until the focus changes, manual setups remember it, hybrid setups pin it.
+    fn choose(&mut self, index: usize, by: Reason) {
+        let setup = self.active_setup();
+        let name = self.config.profiles[index].name.clone();
+        match setup.mode() {
+            SetupMode::Follow => self.reason = Some(by),
+            SetupMode::Manual => {
+                if self.engine.manual.get(&setup.name) != Some(&name) {
+                    self.engine.manual.insert(setup.name.clone(), name);
+                    self.save_state();
+                }
+                self.reason = Some(Reason::Manual);
+            }
+            SetupMode::Hybrid => return self.pin(index),
+        }
+        let changed = index != self.profile;
+        self.switch_profile(index);
+        if changed {
+            self.profile_card();
+        }
+    }
+
+    /// Hybrid setups: pin a profile over the app rules.
+    fn pin(&mut self, index: usize) {
+        let setup = self.active_setup();
+        if setup.mode() != SetupMode::Hybrid {
+            log::warn!("pin: setup {:?} is not hybrid", setup.name);
+            return;
+        }
+        let name = self.config.profiles[index].name.clone();
+        log::info!("{name:?} pinned in {:?}", setup.name);
+        let since = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        self.engine.pin = Some(Pin { setup: setup.name, profile: name, since, at: Instant::now(), app: self.active_app.clone() });
+        self.reason = Some(Reason::Pin);
+        let changed = index != self.profile;
+        self.switch_profile(index);
+        if changed {
+            self.profile_card();
+        }
+    }
+
+    /// End the hybrid pin; the app rules take over again.
+    fn release_pin(&mut self) {
+        if self.engine.pin.take().is_some() {
+            log::info!("pin released");
+            self.apply_decision(true);
+        }
+    }
+
+    fn set_setup(&mut self, name: &str) {
+        if !self.config.effective_setups().iter().any(|s| s.name == name) {
+            return log::warn!("no setup {name:?}");
+        }
+        if self.active_setup().name == name {
+            return;
+        }
+        log::info!("setup {name:?}");
+        self.engine.setup = Some(name.to_owned());
+        self.engine.pin = None;
+        self.picker = None;
+        self.save_state();
+        let before = self.profile;
+        if let Some((p, reason)) = self.engine.decide(&self.config, self.active_app.as_deref())
+            && let Some(i) = self.index_of(&p)
+        {
+            self.reason = Some(reason);
+            self.switch_profile(i);
+        }
+        if before == self.profile {
+            // Same profile, other setup: pinned keys and the state change.
+            self.refresh_all();
+            self.publish_state();
+        }
+        self.setup_feedback();
+    }
+
+    /// `profile = "next" | "prev" | "pick" | name`.
+    fn profile_action(&mut self, which: &str) {
+        let setup = self.active_setup();
+        let current = self.profile_name().unwrap_or_default().to_owned();
+        let list = setups::cycle_list(&setup);
+        let target = match which {
+            "next" => setups::step(&list, &current, 1, setups::wraps(&setup)),
+            "prev" => setups::step(&list, &current, -1, setups::wraps(&setup)),
+            "pick" if self.open_picker(false, list.clone(), &current) => return,
+            "pick" => setups::step(&list, &current, 1, true),
+            name => Some(name.to_owned()),
+        };
+        match target.and_then(|n| self.index_of(&n)) {
+            Some(i) => self.choose(i, Reason::Action),
+            None if !matches!(which, "next" | "prev" | "pick") => log::warn!("no profile {which:?}"),
+            None => {}
+        }
+    }
+
+    /// `setup = "next" | "prev" | "pick" | name`.
+    fn setup_action(&mut self, which: &str) {
+        let current = self.active_setup().name;
+        let names: Vec<String> = self.config.effective_setups().into_iter().map(|s| s.name).collect();
+        let target = match which {
+            "next" => setups::step_setup(&self.config, &current, 1),
+            "prev" => setups::step_setup(&self.config, &current, -1),
+            "pick" if self.open_picker(true, names, &current) => return,
+            "pick" => setups::step_setup(&self.config, &current, 1),
+            name => Some(name.to_owned()),
+        };
+        if let Some(t) = target {
+            self.set_setup(&t);
+        }
+    }
+
+    fn pin_action(&mut self, a: PinAction) {
+        match a {
+            PinAction::Toggle if self.engine.pin_of(&self.active_setup()).is_some() => self.release_pin(),
+            PinAction::Toggle => self.pin(self.profile),
+            PinAction::Release => self.release_pin(),
+        }
+    }
+
+    /// Timeout pins and profile previews that ran out.
+    fn check_pin_and_preview(&mut self, now: Instant) {
+        if self.engine.pin_expired(&self.config, now) {
+            log::info!("pin timed out");
+            self.engine.pin = None;
+            self.apply_decision(true);
+        }
+        if self.preview.as_ref().is_some_and(|p| now >= p.until) {
+            let p = self.preview.take().expect("checked");
+            if self.profile == p.shown && p.back < self.config.profiles.len() {
+                self.reason = p.reason;
+                self.switch_profile(p.back);
+            }
+        }
+    }
+
+    // ───────────────────────────── feedback ─────────────────────────────
+
+    fn feedback_on(&self, f: impl Fn(&masterhub_core::config::Feedback) -> Option<bool>) -> bool {
+        self.config.app.feedback.as_ref().and_then(f) != Some(false)
+    }
+
+    fn setup_color(setup: &Setup) -> Rgb {
+        setup.color.map_or(Rgb::new(0xff, 0xff, 0xff), |c| c.0)
+    }
+
+    /// Card on the dial after a profile change, in setups with `show_on_dial`.
+    fn profile_card(&mut self) {
+        let setup = self.active_setup();
+        if setup.show_on_dial != Some(true) {
+            return;
+        }
+        let card = LiveData::Card {
+            caption: "Profile".into(),
+            name: self.profile_name().unwrap_or_default().to_owned(),
+            sub: format!("{} · {}", setup.name, setups::reason_text(self.reason.as_ref())),
+            ring: Self::setup_color(&setup),
+        };
+        self.show_card(card, PROFILE_CARD);
+    }
+
+    /// After a setup change: a card on the dial and the Base LED blinking twice.
+    fn setup_feedback(&mut self) {
+        let setup = self.active_setup();
+        let card = LiveData::Card {
+            caption: "Setup".into(),
+            name: setup.name.clone(),
+            sub: format!("{} · {}", setups::mode_title(setup.mode()), self.profile_name().unwrap_or_default()),
+            ring: Self::setup_color(&setup),
+        };
+        self.show_card(card, SETUP_CARD);
+        if self.config.status.blink_on_setup && self.feedback_on(|f| f.led) && self.claims.owner(Control::Led(LedZone::Base)).is_none() {
+            self.setup_blink = Some((Self::setup_color(&setup), 0, Instant::now()));
+            self.advance_timers(Instant::now());
+        }
+    }
+
+    fn show_card(&mut self, card: LiveData, how_long: Duration) {
+        if !self.feedback_on(|f| f.dial) || self.claims.owner(Control::Dial).is_some() {
+            return;
+        }
+        self.card = Some((card, Instant::now() + how_long));
+        self.refresh_dials();
+    }
+
+    fn refresh_dials(&mut self) {
+        for s in self.serials_of(ModuleKind::Dial) {
+            self.refresh_target(&s, TARGET_DIAL);
+        }
+    }
+
+    /// Open the dial picker; false when there is no dial to show it on.
+    fn open_picker(&mut self, setups: bool, items: Vec<String>, current: &str) -> bool {
+        if items.is_empty() || self.serials_of(ModuleKind::Dial).is_empty() || self.claims.owner(Control::Dial).is_some() {
+            return false;
+        }
+        let index = items.iter().position(|x| x == current).unwrap_or(0);
+        self.picker = Some(Picker { setups, items, index, until: Instant::now() + PICKER_IDLE });
+        self.card = None;
+        self.refresh_dials();
+        true
+    }
+
+    /// What the picker shows on the dial.
+    fn picker_card(&self, p: &Picker) -> LiveData {
+        let setup = self.active_setup();
+        let caption = if p.setups { "Setup".to_owned() } else { setup.name.clone() };
+        LiveData::Card {
+            caption,
+            name: p.items[p.index].clone(),
+            sub: format!("{} of {} · press to switch", p.index + 1, p.items.len()),
+            ring: Self::setup_color(&setup),
+        }
+    }
+
+    /// Dial input while the picker is open; whether it took it.
+    fn picker_input(&mut self, event: &str) -> bool {
+        let Some(p) = self.picker.as_mut() else { return false };
+        p.until = Instant::now() + PICKER_IDLE;
+        let n = p.items.len();
+        match event {
+            "cw" => p.index = (p.index + 1) % n,
+            "ccw" => p.index = (p.index + n - 1) % n,
+            "down" => {
+                let p = self.picker.take().expect("open");
+                self.swallow_dial_up = true;
+                let choice = p.items[p.index].clone();
+                if p.setups {
+                    self.set_setup(&choice);
+                } else if let Some(i) = self.index_of(&choice) {
+                    self.choose(i, Reason::Manual);
+                }
+            }
+            _ => return true,
+        }
+        self.refresh_dials();
+        true
+    }
+
+    /// Start flashing a module.
+    fn start_identify(&mut self, serial: String) {
+        if !self.modules.contains_key(&serial) {
+            return;
+        }
+        self.end_identify();
+        self.identify = Some(Identify { serial, step: 0, due: Instant::now() });
+        self.advance_timers(Instant::now());
+    }
+
+    fn end_identify(&mut self) {
+        let Some(id) = self.identify.take() else { return };
+        if self.modules.get(&id.serial).is_some_and(|m| m.info.kind == ModuleKind::Base) {
+            self.apply_base_led();
+        } else {
+            self.send_leds(&id.serial);
+            self.refresh_module(&id.serial);
+        }
+    }
+
+    /// The earliest of the feedback timers.
+    fn next_timer(&self) -> Option<Instant> {
+        [
+            self.card.as_ref().map(|c| c.1),
+            self.picker.as_ref().map(|p| p.until),
+            self.dial_hold.as_ref().filter(|h| !h.fired).map(|h| h.since + LONG_PRESS),
+            self.setup_blink.map(|b| b.2),
+            self.identify.as_ref().map(|i| i.due),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    fn advance_timers(&mut self, now: Instant) {
+        if self.card.as_ref().is_some_and(|c| now >= c.1) {
+            self.card = None;
+            self.refresh_dials();
+        }
+        if self.picker.as_ref().is_some_and(|p| now >= p.until) {
+            self.picker = None;
+            self.refresh_dials();
+        }
+        if self.claims.owner(Control::Dial).is_some() {
+            self.dial_hold = None;
+        }
+        if let Some(h) = self.dial_hold.as_mut().filter(|h| !h.fired && now >= h.since + LONG_PRESS) {
+            h.fired = true;
+            if let Some(a) = self.config.dial_of(self.profile_name().unwrap_or_default()).and_then(|d| d.long_press.clone()) {
+                self.run_action(a, None, None);
+            }
+        }
+        if let Some((color, step, due)) = self.setup_blink.filter(|b| now >= b.2) {
+            if step >= 4 || self.claims.owner(Control::Led(LedZone::Base)).is_some() {
+                self.setup_blink = None;
+                self.apply_base_led();
+            } else {
+                let c = if step % 2 == 0 { color } else { Rgb::default() };
+                self.send_base_color(c);
+                self.setup_blink = Some((color, step + 1, (due + SETUP_BLINK).max(now)));
+            }
+        }
+        if let Some(id) = self.identify.as_ref().filter(|i| now >= i.due) {
+            let (serial, step, due) = (id.serial.clone(), id.step, id.due);
+            if step >= IDENTIFY_STEPS {
+                self.end_identify();
+            } else {
+                self.identify = Some(Identify { serial: serial.clone(), step: step + 1, due: (due + IDENTIFY_PHASE).max(now) });
+                self.identify_phase(&serial, step % 2 == 0);
+            }
+        }
+    }
+
+    /// One phase of the identify flash: lit, or what the module showed.
+    fn identify_phase(&mut self, serial: &str, lit: bool) {
+        let Some(kind) = self.modules.get(serial).map(|m| m.info.kind) else { return };
+        match kind {
+            ModuleKind::Keypad | ModuleKind::Dial => self.refresh_module(serial),
+            _ => {
+                let Some(m) = self.modules.get(serial) else { return };
+                let mut reports = Vec::new();
+                for i in 0..kind.led_count() {
+                    let t = LedTarget::Index(i);
+                    reports.extend(led_mode(kind, t, LedMode::Static));
+                    reports.extend(led_color(kind, t, if lit { Rgb::new(0xff, 0xff, 0xff) } else { Rgb::default() }));
+                    reports.extend(led_brightness(kind, t, 100));
+                }
+                let _ = m.tx.send(DeviceCmd::Output(reports));
+            }
+        }
+    }
+
+    /// Set the Base light to one static colour (setup blink).
+    fn send_base_color(&self, c: Rgb) {
+        let Some(m) = self.base_serial().and_then(|s| self.modules.get(&s)) else { return };
+        let t = LedTarget::Index(0);
+        let mut reports: Vec<Vec<u8>> = led_mode(ModuleKind::Base, t, LedMode::Static).into_iter().collect();
+        reports.extend(led_color(ModuleKind::Base, t, c));
+        reports.extend(led_brightness(ModuleKind::Base, t, 100));
+        let _ = m.tx.send(DeviceCmd::Output(reports));
     }
 
     fn switch_profile(&mut self, index: usize) {
@@ -640,8 +1212,15 @@ impl Controller {
             // after a pinned Claude key, or the one before the Claude app was focused), else
             // the profile of the focused app, else the default.
             Action::Back(_) if self.folders.is_empty() => {
-                let app = self.config.profile_for_app(self.active_app.as_deref().unwrap_or_default());
+                // Hybrid: going back ends the pin.
+                self.engine.pin = None;
+                let decided = self.engine.decide(&self.config, self.active_app.as_deref());
+                let app = decided.as_ref().and_then(|(n, _)| self.index_of(n)).unwrap_or(0);
                 if let Some(t) = back_target(self.profile, self.previous_profile, app, self.config.profiles.len()) {
+                    self.reason = match decided {
+                        Some((_, r)) if t == app => Some(r),
+                        _ => Some(Reason::Action),
+                    };
                     self.switch_profile(t);
                 }
                 return true;
@@ -649,16 +1228,19 @@ impl Controller {
             Action::Back(_) => {
                 self.folders.pop();
             }
-            Action::Profile(name) => {
-                match self.config.profiles.iter().position(|p| &p.name == name) {
-                    Some(i) => self.switch_profile(i),
-                    None => log::warn!("profile {name:?}: not supported by this masterhubd yet"),
-                }
+            Action::Profile(which) => {
+                let which = which.clone();
+                self.profile_action(&which);
                 return true;
             }
-            // Setups are not implemented yet: the config may already use them.
-            Action::Setup(_) | Action::Pin(_) => {
-                log::warn!("{action:?}: not supported by this masterhubd yet");
+            Action::Setup(which) => {
+                let which = which.clone();
+                self.setup_action(&which);
+                return true;
+            }
+            Action::Pin(a) => {
+                let a = *a;
+                self.pin_action(a);
                 return true;
             }
             Action::Cmd(_)
@@ -688,20 +1270,21 @@ impl Controller {
     }
 
     /// Global LED colours, with the active profile's overrides applied per field.
+    /// (Its bases' first.)
     fn effective_leds(&self) -> Leds {
-        let mut leds = self.config.leds.clone();
-        if let Some(o) = self.profile_ref().and_then(|p| p.leds.as_ref()) {
-            leds.base = o.base.or(leds.base);
-            leds.fader = o.fader.clone().or(leds.fader);
-            leds.knob = o.knob.clone().or(leds.knob);
-            leds.brightness = o.brightness.or(leds.brightness);
+        match self.profile_name() {
+            Some(p) => self.config.leds_of(p),
+            None => self.config.leds.clone(),
         }
-        leds
     }
 
     fn send_leds(&self, serial: &str) {
         let Some(m) = self.modules.get(serial) else { return };
         let kind = m.info.kind;
+        // A setup blink or identify flash is running; it restores the LEDs when done.
+        if (kind == ModuleKind::Base && self.setup_blink.is_some()) || self.identify.as_ref().is_some_and(|i| i.serial == serial) {
+            return;
+        }
         let leds = self.effective_leds();
         let colors = match kind {
             ModuleKind::Base => self.status_color().or(leds.base).map(masterhub_core::config::OneOrMany::One),
@@ -773,6 +1356,9 @@ impl Controller {
     /// firmware's cycling.
     fn apply_base_led(&self) {
         let Some(serial) = self.base_serial() else { return };
+        if self.base_busy() {
+            return;
+        }
         if self.shown_status.is_none() && self.effective_leds().base.is_none() && self.claimed_led(LedZone::Base).is_none() {
             // No Base colour configured: back to the firmware's colour cycling.
             if let Some(m) = self.modules.get(&serial) {
@@ -784,11 +1370,17 @@ impl Controller {
         }
     }
 
+    /// The setup blink or an identify flash is using the Base light.
+    fn base_busy(&self) -> bool {
+        self.setup_blink.is_some() || self.identify.as_ref().is_some_and(|i| Some(&i.serial) == self.base_serial().as_ref())
+    }
+
     fn advance_blink(&mut self, now: Instant) {
         let Some(due) = self.blink_due.filter(|d| *d <= now) else { return };
         self.blink_on = !self.blink_on;
         self.blink_due = Some((due + BLINK).max(now));
         if self.shown_status == Some(Status::Attention)
+            && !self.base_busy()
             && self.claims.owner(Control::Led(LedZone::Base)).is_none()
             && let (Some(c), Some(m)) = (self.status_color(), self.base_serial().and_then(|s| self.modules.get(&s)))
         {
@@ -1040,16 +1632,16 @@ impl Controller {
 
     fn face_for(&self, target: u8) -> Option<Face> {
         if target == TARGET_DIAL {
-            self.profile_ref()?.dial.as_ref().map(|d| d.face.clone())
+            self.config.dial_of(self.profile_name()?).map(|d| d.face.clone())
         } else {
             self.key_ref(target).map(|k| k.face.clone())
         }
     }
 
-    fn picture(&mut self, path: &std::path::Path, size: u32) -> Option<Rc<Picture>> {
+    fn picture(&mut self, path: &std::path::Path, size: u32, fit: ImageFit) -> Option<Rc<Picture>> {
         self.pictures
-            .entry((path.to_owned(), size))
-            .or_insert_with(|| match load_picture(path, size) {
+            .entry((path.to_owned(), size, fit))
+            .or_insert_with(|| match load_picture_as(path, size, fit) {
                 Ok(p) => Some(Rc::new(p)),
                 Err(e) => {
                     log::error!("{e:#}");
@@ -1062,6 +1654,14 @@ impl Controller {
     /// Render one display target and send it if it changed.
     fn refresh_target(&mut self, serial: &str, target: u8) {
         let size = if target == TARGET_DIAL { DIAL_SIZE } else { KEY_SIZE };
+        if self.identify.as_ref().is_some_and(|i| i.serial == serial && i.step % 2 == 1) {
+            let lit = Face { background: Color::parse("#ffffff"), ..Default::default() };
+            match self.renderer.render(&lit, size, None, None, 0) {
+                Ok(j) => self.show(serial, target, Arc::new(j), false),
+                Err(e) => log::error!("rendering: {e:#}"),
+            }
+            return;
+        }
         if let Some(owner) = self.claims.owner(Control::of_target(target)) {
             self.anims.remove(&(serial.to_owned(), target));
             let frame = self.claims.get(owner).and_then(|c| c.frames.get(&target).cloned());
@@ -1076,8 +1676,25 @@ impl Controller {
             self.show(serial, target, jpeg, true);
             return;
         }
+        if target == TARGET_DIAL {
+            let card = match (&self.picker, &self.card) {
+                (Some(p), _) => Some(self.picker_card(p)),
+                (None, Some((c, _))) => Some(c.clone()),
+                (None, None) => None,
+            };
+            if let Some(card) = card {
+                self.anims.remove(&(serial.to_owned(), target));
+                let turn = self.turn_for(serial);
+                match self.renderer.render(&Face::default(), size, None, Some(&card), turn) {
+                    Ok(j) => self.show(serial, target, Arc::new(j), false),
+                    Err(e) => log::error!("rendering: {e:#}"),
+                }
+                return;
+            }
+        }
         let face = self.face_for(target).unwrap_or_default();
-        let picture = face.image.as_ref().and_then(|p| self.picture(p, size));
+        let fit = face.fit.unwrap_or_default();
+        let picture = face.image.as_ref().and_then(|p| self.picture(p, size, fit));
         let frame = match picture.as_deref() {
             Some(Picture::Still(img)) => Some(img),
             Some(Picture::Animated(frames)) => {
@@ -1138,8 +1755,8 @@ impl Controller {
             let size = if target == TARGET_DIAL { DIAL_SIZE } else { KEY_SIZE };
             let delay = self
                 .face_for(target)
-                .and_then(|f| f.image)
-                .and_then(|p| self.picture(&p, size))
+                .and_then(|f| Some((f.image?, f.fit.unwrap_or_default())))
+                .and_then(|(p, fit)| self.picture(&p, size, fit))
                 .and_then(|pic| match &*pic {
                     Picture::Animated(frames) => {
                         let anim = self.anims.get_mut(&(serial.clone(), target))?;
@@ -1166,11 +1783,55 @@ impl Controller {
     /// Sample live data for widgets visible on connected displays.
     fn sample_widgets(&mut self) {
         let needed = self.visible_widgets();
-        self.live = self.stats.sample(&needed);
+        // Widgets with a `refresh` of more than a tick keep their value in between.
+        let refresh = self.widget_refresh();
+        let now = Instant::now();
+        let due = |w: &Widget, sampled: &HashMap<Widget, Instant>| match refresh.get(w) {
+            Some(&secs) if secs > 1 => sampled
+                .get(w)
+                .is_none_or(|t| now.duration_since(*t) + Duration::from_millis(200) >= Duration::from_secs(u64::from(secs))),
+            _ => true,
+        };
+        let fresh: Vec<Widget> = needed.iter().filter(|w| due(w, &self.sampled)).cloned().collect();
+        let mut live = self.stats.sample(&fresh);
+        for w in &needed {
+            if !fresh.contains(w)
+                && let Some(v) = self.live.get(w)
+            {
+                live.insert(w.clone(), v.clone());
+            }
+        }
+        for w in fresh {
+            self.sampled.insert(w, now);
+        }
+        self.sampled.retain(|w, _| needed.contains(w));
+        self.live = live;
         let slots = self.session_slots();
         for w in needed {
             self.set_session_live(w, slots);
         }
+    }
+
+    /// The shortest `refresh` of each visible widget that has one.
+    fn widget_refresh(&self) -> HashMap<Widget, u16> {
+        let mut out: HashMap<Widget, u16> = HashMap::new();
+        let mut targets: Vec<u8> = Vec::new();
+        for m in self.modules.values() {
+            match m.info.kind {
+                ModuleKind::Keypad => targets.extend(0..KEY_COUNT as u8),
+                ModuleKind::Dial => targets.push(TARGET_DIAL),
+                _ => {}
+            }
+        }
+        for t in targets {
+            if let Some(w) = self.face_for(t).and_then(|f| f.widget)
+                && let Some(r) = w.refresh
+            {
+                let e = out.entry(w.widget).or_insert(r);
+                *e = (*e).min(r);
+            }
+        }
+        out
     }
 
     /// Widgets on the connected displays right now.
@@ -1262,10 +1923,47 @@ impl Controller {
             if claim.is_some() {
                 continue;
             }
+            if control == "dial" && self.dial_input(event) {
+                continue;
+            }
             if let Some(action) = self.binding(control, index, event) {
                 let coalesce = (control == "fader").then(|| format!("{serial}/fader{index}"));
                 self.run_action(action, value, coalesce);
             }
+        }
+    }
+
+    /// The picker and `long_press` on the dial; whether they took the event.
+    fn dial_input(&mut self, event: &str) -> bool {
+        if event == "up" && std::mem::take(&mut self.swallow_dial_up) {
+            return true;
+        }
+        if event == "down" {
+            self.swallow_dial_up = false;
+        }
+        if self.picker.is_some() {
+            return self.picker_input(event);
+        }
+        let has_long = self.config.dial_of(self.profile_name().unwrap_or_default()).is_some_and(|d| d.long_press.is_some());
+        match event {
+            "down" if has_long => {
+                // Press waits for the release, to tell it from a long press.
+                self.dial_hold = Some(DialHold { since: Instant::now(), fired: false });
+                true
+            }
+            "up" => match self.dial_hold.take() {
+                Some(h) if h.fired => true,
+                Some(_) => {
+                    for e in ["down", "up"] {
+                        if let Some(a) = self.binding("dial", 0, e) {
+                            self.run_action(a, None, None);
+                        }
+                    }
+                    true
+                }
+                None => false,
+            },
+            _ => false,
         }
     }
 
@@ -1299,7 +1997,7 @@ impl Controller {
 
     /// The action bound to an input in the active profile.
     fn binding(&self, control: &str, index: u8, event: &str) -> Option<Action> {
-        let p = self.profile_ref()?;
+        let p = self.profile_name()?;
         let pick = |cw: &Option<Action>, ccw: &Option<Action>, press: &Option<Action>, release: &Option<Action>| {
             match event {
                 "cw" => cw.clone(),
@@ -1314,18 +2012,18 @@ impl Controller {
                 let k = self.key_ref(index)?;
                 if event == "down" { k.press.clone() } else { k.release.clone() }
             }
-            "fader" => p.faders.iter().find(|f| f.index == index)?.change.clone(),
+            "fader" => self.config.fader_of(p, index)?.change.clone(),
             "knob" => {
-                let k = p.knobs.iter().find(|k| k.index == index)?;
+                let k = self.config.knob_of(p, index)?;
                 pick(&k.cw, &k.ccw, &k.press, &k.release)
             }
             "dial" => {
-                let d = p.dial.as_ref()?;
+                let d = self.config.dial_of(p)?;
                 pick(&d.cw, &d.ccw, &d.press, &d.release)
             }
             "roller" => {
                 let side = if index == 0 { Side::Left } else { Side::Right };
-                match p.rollers.iter().find(|r| r.side == side) {
+                match self.config.roller_of(p, side) {
                     Some(r) => if event == "away" { r.away.clone() } else { r.toward.clone() },
                     // Unbound, the left roller scrolls the session keys on screen.
                     None if side == Side::Left && self.session_slots() > 0 => {
@@ -1343,12 +2041,14 @@ impl Controller {
     fn publish_state(&self) {
         let state = HubState {
             profile: self.profile_name().unwrap_or_default().to_owned(),
-            page: self.page_ref().map(|p| p.name.clone()).unwrap_or_default(),
+            page: self.page_ref().map(|p| p.name.clone()).or_else(|| self.folders.last().cloned()).unwrap_or_default(),
             in_folder: !self.folders.is_empty(),
             horizontal: self.config.orientation.rotation(self.sensor_horizontal) % 180 == 90,
             rotation: self.config.orientation.rotation(self.sensor_horizontal),
             active_app: self.active_app.clone(),
-            ..Default::default()
+            setup: Some(self.active_setup().name),
+            reason: self.reason.clone(),
+            pinned: self.engine.pin_state(&self.config),
         };
         let changed = {
             let mut s = self.snapshot.lock().unwrap();
@@ -1379,7 +2079,7 @@ impl Controller {
                     socket,
                     placement,
                     firmware: m.firmware.clone(),
-                    needs_replug: false,
+                    needs_replug: m.needs_replug,
                 }
             })
             .collect();
@@ -1661,6 +2361,211 @@ mod tests {
         // Fewer keys on this page than where the offset came from: the page that holds it.
         assert_eq!(page_start(13, 30, 5), 10);
         assert_eq!(page_start(5, 30, 0), 0);
+    }
+
+    // ───────── setups (no modules connected: nothing reaches hardware) ─────────
+
+    fn controller(toml: &str) -> Controller {
+        let config = Config::parse(toml, std::path::Path::new(".")).unwrap();
+        let (actions, _) = std::sync::mpsc::channel();
+        let path = PathBuf::from("/nonexistent/openmasterhub/config.toml");
+        Controller::new(config, toml.into(), path, actions, Arc::default(), Arc::default(), None)
+    }
+
+    fn live(c: &Controller) -> (String, Option<Reason>) {
+        (c.profile_name().unwrap_or_default().to_owned(), c.reason.clone())
+    }
+
+    fn focus(c: &mut Controller, app: &str) {
+        c.handle(Msg::ActiveApp(app.into()));
+    }
+
+    const LEGACY: &str = r#"
+[[profile]]
+name = "Default"
+[[profile]]
+name = "Streaming"
+apps = ["obs", "com.obsproject.Studio"]
+[[profile]]
+name = "Shell"
+apps = ["*ghostty"]
+"#;
+
+    #[test]
+    fn legacy_config_behaves_as_before() {
+        let mut c = controller(LEGACY);
+        assert_eq!(live(&c), ("Default".into(), Some(Reason::Fallback)));
+        for app in ["obs", "kitty", "com.mitchellh.ghostty", "OBS", "firefox"] {
+            focus(&mut c, app);
+            assert_eq!(c.profile, c.config.profile_for_app(app), "{app}");
+        }
+        // A profile chosen by hand stays until the focus changes, then the app's comes back.
+        c.handle(Msg::SetProfile("Shell".into()));
+        assert_eq!(live(&c), ("Shell".into(), Some(Reason::Manual)));
+        focus(&mut c, GUI_APP_ID);
+        assert_eq!(c.profile_name(), Some("Shell"));
+        focus(&mut c, "firefox");
+        assert_eq!(live(&c), ("Default".into(), Some(Reason::Fallback)));
+        // A `profile` action too.
+        c.run_action(Action::Profile("Streaming".into()), None, None);
+        assert_eq!(live(&c), ("Streaming".into(), Some(Reason::Action)));
+        // Back goes to the profile before.
+        c.run_action(Action::Back(true), None, None);
+        assert_eq!(c.profile_name(), Some("Default"));
+        let state = c.snapshot.lock().unwrap().state.clone();
+        assert_eq!((state.setup.as_deref(), state.pinned), (Some("Default"), None));
+        // Only one setup: switching does nothing.
+        c.run_action(Action::Setup("next".into()), None, None);
+        assert_eq!(c.active_setup().name, "Default");
+    }
+
+    #[test]
+    fn modes_switch_as_designed() {
+        let mut c = controller(crate::setups::tests::FIXTURE);
+        assert_eq!(live(&c), ("Desktop".into(), Some(Reason::Fallback)));
+        focus(&mut c, "blender");
+        assert_eq!(live(&c), ("Blender".into(), Some(Reason::Rule { pattern: "blender".into(), index: 0 })));
+
+        // Manual: focus does nothing, next/prev step through the list (wrap on).
+        c.handle(Msg::SetSetup("Stream".into()));
+        assert_eq!(live(&c), ("Scenes".into(), Some(Reason::Manual)));
+        focus(&mut c, "discord");
+        assert_eq!(c.profile_name(), Some("Scenes"));
+        c.run_action(Action::Profile("next".into()), None, None);
+        assert_eq!(live(&c), ("Desktop".into(), Some(Reason::Manual)));
+        assert_eq!(c.engine.manual.get("Stream").map(String::as_str), Some("Desktop"));
+        c.run_action(Action::Profile("next".into()), None, None);
+        assert_eq!(c.profile_name(), Some("Scenes"));
+        c.run_action(Action::Profile("prev".into()), None, None);
+        assert_eq!(c.profile_name(), Some("Desktop"));
+
+        // Back to Work: the rules pick again; then Stream remembers its choice.
+        c.handle(Msg::SetSetup("Work".into()));
+        assert_eq!(c.profile_name(), Some("Desktop")); // discord is not in Work
+        focus(&mut c, "godot");
+        assert_eq!(c.profile_name(), Some("Godot"));
+        c.handle(Msg::SetSetup("Stream".into()));
+        assert_eq!(c.profile_name(), Some("Desktop"));
+
+        // Hybrid: follows, a manual switch pins, the next app releases (release = next_app).
+        c.run_action(Action::Setup("next".into()), None, None);
+        assert_eq!(c.active_setup().name, "Play");
+        focus(&mut c, "discord");
+        assert_eq!(c.profile_name(), Some("Discord"));
+        c.handle(Msg::SetProfile("Cyberpunk 2077".into()));
+        assert_eq!(live(&c), ("Cyberpunk 2077".into(), Some(Reason::Pin)));
+        assert_eq!(c.snapshot.lock().unwrap().state.pinned.as_ref().map(|p| p.profile.clone()).as_deref(), Some("Cyberpunk 2077"));
+        focus(&mut c, "discord"); // the app it was pinned in: still pinned
+        assert_eq!(c.profile_name(), Some("Cyberpunk 2077"));
+        focus(&mut c, "kitty");
+        assert_eq!(live(&c), ("Desktop light".into(), Some(Reason::Fallback)));
+        assert!(c.snapshot.lock().unwrap().state.pinned.is_none());
+
+        // The pin action toggles.
+        c.run_action(Action::Pin(PinAction::Toggle), None, None);
+        assert_eq!(live(&c), ("Desktop light".into(), Some(Reason::Pin)));
+        c.run_action(Action::Pin(PinAction::Toggle), None, None);
+        assert_eq!(live(&c), ("Desktop light".into(), Some(Reason::Fallback)));
+        // Pinning outside hybrid setups does nothing.
+        c.handle(Msg::SetSetup("Work".into()));
+        c.handle(Msg::Pin(None));
+        assert!(c.engine.pin.is_none());
+    }
+
+    #[test]
+    fn pins_time_out_and_survive_focus() {
+        let mut toml = crate::setups::tests::FIXTURE.replace(r#"release = "next_app""#, "release = \"timeout\"\nrelease_after = 1");
+        toml.push('\n');
+        let mut c = controller(&toml);
+        c.handle(Msg::SetSetup("Play".into()));
+        c.handle(Msg::Pin(Some("Discord".into())));
+        focus(&mut c, "steam_app_1091500");
+        assert_eq!(live(&c), ("Discord".into(), Some(Reason::Pin)));
+        let at = c.engine.pin.as_ref().unwrap().at;
+        c.check_pin_and_preview(at + Duration::from_secs(59));
+        assert_eq!(c.profile_name(), Some("Discord"));
+        c.check_pin_and_preview(at + Duration::from_secs(60));
+        assert_eq!(live(&c), ("Cyberpunk 2077".into(), Some(Reason::Rule { pattern: "steam_app_1091500".into(), index: 0 })));
+        // release_pin always ends it.
+        c.handle(Msg::Pin(None));
+        c.handle(Msg::ReleasePin);
+        assert!(c.engine.pin.is_none());
+    }
+
+    #[test]
+    fn dial_long_press() {
+        let toml = r#"
+[[setup]]
+name = "A"
+profiles = []
+fallback = "One"
+[[setup]]
+name = "B"
+mode = "manual"
+profiles = ["Two", "One"]
+[[profile]]
+name = "One"
+dial = { press = { profile = "Two" }, long_press = { setup = "next" } }
+[[profile]]
+name = "Two"
+dial = { press = { page = "next" } }
+"#;
+        let mut c = controller(toml);
+        // Held: the long press, then the release does nothing.
+        assert!(c.dial_input("down"));
+        let since = c.dial_hold.as_ref().unwrap().since;
+        c.advance_timers(since + Duration::from_millis(599));
+        assert_eq!(c.active_setup().name, "A");
+        c.advance_timers(since + LONG_PRESS);
+        assert_eq!((c.active_setup().name.as_str(), c.profile_name()), ("B", Some("Two")));
+        assert!(c.dial_input("up"));
+        assert_eq!(c.profile_name(), Some("Two"));
+        // Two has no long press: press and release go through as before.
+        assert!(!c.dial_input("down"));
+        assert!(!c.dial_input("up"));
+        c.run_action(Action::Profile("next".into()), None, None);
+        assert_eq!(c.profile_name(), Some("One"));
+        // Tapped: the press runs on release.
+        assert!(c.dial_input("down"));
+        assert!(c.dial_input("up"));
+        assert_eq!(c.profile_name(), Some("Two"));
+        // `pick` without a dial connected steps to the next.
+        c.run_action(Action::Setup("pick".into()), None, None);
+        assert_eq!(c.active_setup().name, "A");
+    }
+
+    #[test]
+    fn config_changes_keep_the_setup() {
+        let mut c = controller(crate::setups::tests::FIXTURE);
+        c.handle(Msg::SetSetup("Stream".into()));
+        let renamed = crate::setups::tests::FIXTURE.replace(r#"name = "Stream""#, r#"name = "Live""#);
+        let config = Config::parse(&renamed, std::path::Path::new(".")).unwrap();
+        c.handle(Msg::ApplyConfig { config: Box::new(config), text: renamed });
+        assert_eq!(c.active_setup().name, "Live");
+        assert_eq!(live(&c), ("Scenes".into(), Some(Reason::Manual)));
+        // The active setup removed: the first, deciding from the focused app.
+        let gone = crate::setups::tests::FIXTURE.replace(r#"name = "Stream""#, r#"name = "Other""#).replace(r#"profiles = ["Scenes", "Desktop"]"#, r#"profiles = ["Desktop"]"#);
+        let config = Config::parse(&gone, std::path::Path::new(".")).unwrap();
+        focus(&mut c, "blender");
+        c.handle(Msg::ApplyConfig { config: Box::new(config.clone()), text: gone.clone() });
+        // Renamed again (same place, new name): followed.
+        assert_eq!(c.active_setup().name, "Other");
+        c.handle(Msg::SetSetup("Work".into()));
+        let mut two = config;
+        two.setups.remove(0);
+        c.handle(Msg::ApplyConfig { config: Box::new(two), text: gone });
+        assert_eq!(c.active_setup().name, "Other");
+    }
+
+    #[test]
+    fn previews_go_back() {
+        let mut c = controller(LEGACY);
+        focus(&mut c, "obs");
+        c.handle(Msg::Preview { name: "Shell".into(), secs: 10 });
+        assert_eq!(live(&c), ("Shell".into(), Some(Reason::Action)));
+        let until = c.preview.as_ref().unwrap().until;
+        c.check_pin_and_preview(until);
+        assert_eq!(live(&c), ("Streaming".into(), Some(Reason::Rule { pattern: "obs".into(), index: 0 })));
     }
 
     #[test]
