@@ -34,7 +34,7 @@
 
   async function identify() {
     try {
-      await invoke('identify_module', { serial: module.serial });
+      await invoke('identify', { serial: module.serial });
       toast({ text: 'Flashing the module for 3 seconds', timeout: 3000 });
     } catch (e) {
       toast({ text: `Could not identify: ${e}`, kind: 'warning' });

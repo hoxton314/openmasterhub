@@ -55,7 +55,6 @@ fn output(cmd: &mut Command) -> Option<String> {
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum ServiceStatus {
-    Running,
     Stopped,
     Starting,
     /// It ended with an error: `reason` reads after "It ran into", `code` is the exit code.
@@ -67,11 +66,13 @@ pub enum ServiceStatus {
     },
 }
 
-/// Whether masterhubd runs, is starting, stopped or crashed (and with which exit code).
+/// Whether masterhubd is starting, stopped or crashed (and with which exit code). The UI asks
+/// while the service is unreachable; one that has just become reachable is still "starting"
+/// until the UI hears of it.
 #[tauri::command]
 pub fn service_status(state: State<AppState>) -> ServiceStatus {
     if state.client.is_online() {
-        return ServiceStatus::Running;
+        return ServiceStatus::Starting;
     }
     if LAUNCHED_AT.lock().unwrap().is_some_and(|t| t.elapsed() < Duration::from_secs(6)) {
         return ServiceStatus::Starting;

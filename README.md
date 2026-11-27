@@ -176,6 +176,15 @@ Virtual key presses use `/dev/uinput`, which the logged-in user can normally acc
 actions and widgets talk to PipeWire (`pipewire-pulse`) or PulseAudio directly, and GPU widgets
 use NVML (NVIDIA) or sysfs (AMD).
 
+**Tray, shortcuts and switch toast.** The app lives in the tray (on Linux this needs
+`libayatana-appindicator`; without it the window just quits on close): the menu shows what is live
+and why, switches setups and the profiles of manual setups, pins and pauses hub actions.
+Shortcuts from `[[setup]]` (`shortcut`, `next`, `prev`, `pin`) are global on X11 and Windows. On
+Wayland apps cannot grab keys, so bind the same things in your compositor, e.g.
+`masterhubd ctl setup Stream`, `masterhubd ctl profile next`, `masterhubd ctl pin`. A small toast
+near the tray shows each switch (Settings › Feedback); it never takes focus and is skipped while a
+fullscreen window is in front.
+
 ## Developing the app
 
 ```sh
