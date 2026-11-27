@@ -180,7 +180,8 @@ fn handle(
         Request::SetConfig { toml } => {
             let path = snapshot.lock().unwrap().config_path.clone();
             let dir = path.parent().unwrap_or(std::path::Path::new("."));
-            let config = Config::parse(&toml, dir)?;
+            let config = Config::parse_unchecked(&toml, dir)?;
+            crate::actions::validate_config(&config)?;
             if let Some(d) = path.parent() {
                 std::fs::create_dir_all(d)?;
             }

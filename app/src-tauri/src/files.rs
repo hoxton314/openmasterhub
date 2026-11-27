@@ -197,7 +197,8 @@ pub fn restore_config(state: State<AppState>, path: String) -> Result<String, St
 fn restore(client: &Client, path: &Path) -> Result<String> {
     let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     // Relative paths in the file are meant relative to the config folder it is restored to.
-    Config::parse(&text, &config_dir(client)).with_context(|| format!("in {}", path.display()))?;
+    let config = Config::parse(&text, &config_dir(client)).with_context(|| format!("in {}", path.display()))?;
+    config.validate_holds().with_context(|| format!("in {}", path.display()))?;
     let saved = backup(client)?;
     client.set_config(&text)?;
     Ok(saved.display().to_string())

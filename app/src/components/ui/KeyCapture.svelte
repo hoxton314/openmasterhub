@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import { Circle } from 'lucide-svelte';
-  import { comboOf, modifiers, prettyKeys } from '../../lib/keys';
+  import { comboOf, MAX_HOLD_MS, modifiers, prettyKeys } from '../../lib/keys';
   import Button from './Button.svelte';
   import Kbd from './Kbd.svelte';
   import KeyCombo from './KeyCombo.svelte';
@@ -103,7 +103,7 @@
         onchange={(v) => onhold(v === 'hold' ? (hold ?? 250) : undefined)}
       />
       {#if hold}
-        <div class="ms"><NumberField value={hold} min={20} max={10000} step={10} unit="ms" onchange={(v) => onhold(v ?? 250)} /></div>
+        <div class="ms"><NumberField value={hold} min={20} max={MAX_HOLD_MS} step={10} unit="ms" onchange={(v) => onhold(v ?? 250)} /></div>
         <span class="note">Held for {hold} ms, then released</span>
       {:else}
         <span class="note">Sent once, released at once</span>

@@ -101,6 +101,7 @@ fn snapshot(state: State<AppState>) -> Snapshot {
 #[tauri::command]
 fn save_config(state: State<AppState>, config: Config) -> Result<(), String> {
     config.validate().map_err(err)?;
+    config.validate_holds().map_err(err)?;
     let text = config.to_toml().map_err(err)?;
     *state.last_sent.lock().unwrap() = Some(text.clone());
     state.client.set_config(&text).map_err(err)

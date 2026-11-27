@@ -667,7 +667,9 @@ impl Controller {
         self.config_mtime = m;
         match std::fs::read_to_string(&self.config_path).map_err(anyhow::Error::from).and_then(|text| {
             let dir = self.config_path.parent().unwrap_or(std::path::Path::new("."));
-            Config::parse(&text, dir).map(|c| (c, text))
+            let config = Config::parse_unchecked(&text, dir)?;
+            crate::actions::validate_config(&config)?;
+            Ok((config, text))
         }) {
             Ok((config, text)) => {
                 log::info!("{} changed, reloading", self.config_path.display());
@@ -911,7 +913,9 @@ impl Controller {
         let setup = self.active_setup();
         let current = self.profile_name().unwrap_or_default().to_owned();
         let list = setups::cycle_list(&setup);
+        // A profile with exactly that name wins over the keywords.
         let target = match which {
+            name if self.index_of(name).is_some() => Some(name.to_owned()),
             "next" => setups::step(&list, &current, 1, setups::wraps(&setup)),
             "prev" => setups::step(&list, &current, -1, setups::wraps(&setup)),
             "pick" if self.open_picker(false, list.clone(), &current) => return,
@@ -930,6 +934,7 @@ impl Controller {
         let current = self.active_setup().name;
         let names: Vec<String> = self.config.effective_setups().into_iter().map(|s| s.name).collect();
         let target = match which {
+            name if names.iter().any(|n| n == name) => Some(name.to_owned()),
             "next" => setups::step_setup(&self.config, &current, 1),
             "prev" => setups::step_setup(&self.config, &current, -1),
             "pick" if self.open_picker(true, names, &current) => return,
@@ -1227,7 +1232,8 @@ impl Controller {
             Action::Back(_) if self.folders.is_empty() => {
                 // Hybrid: going back ends the pin.
                 self.engine.pin = None;
-                let decided = self.engine.decide(&self.config, self.active_app.as_deref());
+                // Nothing focused counts as an empty class, as before setups: a `*` pattern matches.
+                let decided = self.engine.decide(&self.config, Some(self.active_app.as_deref().unwrap_or_default()));
                 let app = decided.as_ref().and_then(|(n, _)| self.index_of(n)).unwrap_or(0);
                 if let Some(t) = back_target(self.profile, self.previous_profile, app, self.config.profiles.len()) {
                     self.reason = match decided {
@@ -2594,6 +2600,30 @@ dial = { press = { page = "next" } }
         let until = c.preview.as_ref().unwrap().until;
         c.check_pin_and_preview(until);
         assert_eq!(live(&c), ("Streaming".into(), Some(Reason::Rule { pattern: "obs".into(), index: 0 })));
+    }
+
+    #[test]
+    fn profile_named_like_a_keyword_is_targetable() {
+        let toml = "[[profile]]\nname='Default'\n[[profile]]\nname='next'\n[[profile]]\nname='Other'\n";
+        let mut c = controller(toml);
+        c.run_action(Action::Profile("next".into()), None, None);
+        assert_eq!(live(&c), ("next".into(), Some(Reason::Action)));
+        // Without such a profile the keyword steps.
+        let mut c = controller("[[profile]]\nname='Default'\n[[profile]]\nname='Other'\n");
+        c.run_action(Action::Profile("next".into()), None, None);
+        assert_eq!(c.profile_name(), Some("Other"));
+    }
+
+    #[test]
+    fn back_matches_a_wildcard_with_nothing_focused() {
+        let toml = "[[profile]]\nname='Default'\n[[profile]]\nname='Other'\napps=['foo']\n[[profile]]\nname='Any'\napps=['*']\n";
+        let mut c = controller(toml);
+        assert_eq!(c.profile_name(), Some("Default"));
+        c.run_action(Action::Profile("Other".into()), None, None);
+        c.previous_profile = None;
+        // As with `profile_for_app("")`: an empty class matches `*`.
+        c.run_action(Action::Back(true), None, None);
+        assert_eq!(c.profile_name(), Some("Any"));
     }
 
     #[test]

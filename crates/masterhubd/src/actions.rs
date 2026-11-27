@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 
-use masterhub_core::config::{Action, VolumeChange};
+use masterhub_core::config::{Action, Config, VolumeChange};
 
 use crate::audio;
 use crate::keyboard::Keyboard;
@@ -134,5 +134,82 @@ pub fn validate(action: &Action) -> Result<()> {
     match action {
         Action::Keys(k) => crate::keyboard::validate(&k.combo()),
         _ => Ok(()),
+    }
+}
+
+/// Every binding the service cannot run, as one message each: `keys` actions (profiles and
+/// pinned keys) and setup shortcuts whose key names or hold do not parse.
+pub fn binding_errors(config: &Config) -> Vec<String> {
+    let mut errors = Vec::new();
+    for profile in &config.profiles {
+        for action in profile.actions() {
+            if let Err(e) = validate(action) {
+                errors.push(format!("profile {:?}: {e:#}", profile.name));
+            }
+        }
+    }
+    for pinned in &config.pinned {
+        for action in [&pinned.key.press, &pinned.key.release].into_iter().flatten() {
+            if let Err(e) = validate(action) {
+                errors.push(format!("pinned key {}: {e:#}", pinned.key.index));
+            }
+        }
+    }
+    for setup in &config.setups {
+        for shortcut in setup.shortcuts() {
+            if let Err(e) = crate::keyboard::validate(shortcut) {
+                errors.push(format!("setup {:?}: shortcut {shortcut:?}: {e:#}", setup.name));
+            }
+        }
+    }
+    errors
+}
+
+/// The full check for a config that is about to be saved or reloaded: [`Config::validate`]
+/// plus [`binding_errors`]. Startup uses the same check but only logs binding errors.
+pub fn validate_config(config: &Config) -> Result<()> {
+    config.validate()?;
+    config.validate_holds()?;
+    let errors = binding_errors(config);
+    if !errors.is_empty() {
+        anyhow::bail!("{}", errors.join("; "));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn parse(toml: &str) -> Config {
+        Config::parse_unchecked(toml, Path::new(".")).unwrap()
+    }
+
+    #[test]
+    fn full_validation_covers_bindings() {
+        let ok = parse("[[profile]]\nname='A'\n[[profile.page]]\nname='P'\n[[profile.page.key]]\nindex=0\npress={keys='ctrl+c'}\n");
+        assert!(validate_config(&ok).is_ok());
+
+        let typo = parse("[[profile]]\nname='A'\n[profile.dial]\npress={keys='ctrl+nosuchkey'}\n");
+        let e = validate_config(&typo).unwrap_err().to_string();
+        assert!(e.contains("nosuchkey") && e.contains("\"A\""), "{e}");
+
+        let pinned = parse("[[profile]]\nname='A'\n[[pinned]]\nindex=1\npress={keys='ctrl+nosuchkey'}\n");
+        assert!(validate_config(&pinned).unwrap_err().to_string().contains("pinned key 1"));
+
+        let shortcut = parse("[[profile]]\nname='A'\n[[setup]]\nname='S'\nprofiles=[]\nfallback='A'\nshortcut='ctrl+nosuchkey'\n");
+        assert!(validate_config(&shortcut).unwrap_err().to_string().contains("shortcut"));
+    }
+
+    #[test]
+    fn hold_over_the_limit_is_rejected_everywhere() {
+        let over = masterhub_core::config::MAX_HOLD_MS + 1;
+        let dial = format!("[[profile]]\nname='A'\n[profile.dial]\npress={{keys={{combo='o', hold={over}}}}}\n");
+        // Already by the core check, which the app runs too.
+        assert!(parse(&dial).validate_holds().is_err());
+        assert!(validate_config(&parse(&dial)).is_err());
+        let at_limit = dial.replace(&over.to_string(), &masterhub_core::config::MAX_HOLD_MS.to_string());
+        assert!(validate_config(&parse(&at_limit)).is_ok());
     }
 }

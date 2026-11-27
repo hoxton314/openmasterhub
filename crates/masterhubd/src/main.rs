@@ -111,14 +111,15 @@ fn main() -> Result<()> {
         log::warn!("{} not found, starting with an empty config", path.display());
         (Config::default(), String::new())
     };
-    let pinned = config.pinned.iter().flat_map(|p| [&p.key.press, &p.key.release]).flatten();
-    for action in config.profiles.iter().flat_map(|p| p.actions()).chain(pinned) {
-        actions::validate(action)?;
+    // The app and hot reload reject such bindings when saving; one that still gets here (a
+    // hand-edited file, an older version's save) is reported but must not keep the service
+    // from starting: the action is skipped with an error when pressed.
+    let errors = actions::binding_errors(&config);
+    if check && !errors.is_empty() {
+        bail!("{}", errors.join("\n"));
     }
-    for setup in &config.setups {
-        for shortcut in setup.shortcuts() {
-            keyboard::validate(shortcut).with_context(|| format!("setup {:?}: shortcut {shortcut:?}", setup.name))?;
-        }
+    for e in &errors {
+        log::error!("ignoring binding: {e}");
     }
     if check {
         println!("{}: ok", path.display());

@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use masterhub_proto::Rgb;
 use serde::{Deserialize, Serialize};
 
@@ -892,6 +892,20 @@ pub struct KeysHold {
     pub hold: Option<u32>,
 }
 
+/// The longest `keys` hold accepted (ms): the service waits it out on its actions thread.
+pub const MAX_HOLD_MS: u64 = 3000;
+
+/// Split `combo` or `combo@ms` into the key names and the hold in ms (0 for a tap), checking
+/// the hold against [`MAX_HOLD_MS`]. Key names are not checked here (the service does that).
+pub fn split_hold(combo: &str) -> Result<(&str, u64)> {
+    let Some((keys, ms)) = combo.rsplit_once('@') else { return Ok((combo, 0)) };
+    let ms: u64 = ms.trim().parse().map_err(|_| anyhow!("bad hold time in {combo:?}"))?;
+    if ms > MAX_HOLD_MS {
+        bail!("hold of {ms} ms in {combo:?} is over {MAX_HOLD_MS} ms");
+    }
+    Ok((keys, ms))
+}
+
 impl KeysAction {
     /// The combination in the keyboard's `combo` / `combo@ms` syntax.
     pub fn combo(&self) -> String {
@@ -1321,6 +1335,32 @@ impl Config {
         }
         if self.pinned.iter().filter_map(|p| p.key.face.widget.as_ref()).any(|w| w.refresh == Some(0)) {
             bail!("pinned key: widget refresh must be at least 1 second");
+        }
+        Ok(())
+    }
+
+    /// The hold of every `keys` action and setup shortcut is within [`MAX_HOLD_MS`]. Kept apart
+    /// from [`Config::validate`] so the service can still start on a file that breaks it (the
+    /// binding is then skipped); everything that saves a config runs both.
+    pub fn validate_holds(&self) -> Result<()> {
+        for p in &self.profiles {
+            for action in p.actions() {
+                if let Action::Keys(k) = action {
+                    split_hold(&k.combo()).with_context(|| format!("{}: keys action", p.name))?;
+                }
+            }
+        }
+        for p in &self.pinned {
+            for action in [&p.key.press, &p.key.release].into_iter().flatten() {
+                if let Action::Keys(k) = action {
+                    split_hold(&k.combo()).with_context(|| format!("pinned key {}: keys action", p.key.index))?;
+                }
+            }
+        }
+        for s in &self.setups {
+            for shortcut in s.shortcuts() {
+                split_hold(shortcut).with_context(|| format!("setup {:?}: shortcut {shortcut:?}", s.name))?;
+            }
         }
         Ok(())
     }
@@ -1823,6 +1863,20 @@ mod tests {
     }
 
     /// Without `[[setup]]` the implicit setup picks exactly what `profile_for_app` picks.
+    #[test]
+    fn holds_are_limited() {
+        assert_eq!(split_hold("o").unwrap(), ("o", 0));
+        assert_eq!(split_hold("o@700").unwrap(), ("o", 700));
+        assert!(split_hold("o@3001").is_err());
+        assert!(split_hold("o@x").is_err());
+        let toml = |ms: u64| format!("[[profile]]\nname='A'\n[profile.dial]\npress={{keys={{combo='o', hold={ms}}}}}\n[[pinned]]\nindex=0\nrelease={{keys='p@{ms}'}}\n");
+        let ok = Config::parse(&toml(MAX_HOLD_MS), Path::new(".")).unwrap();
+        assert!(ok.validate_holds().is_ok());
+        // `validate` leaves it to `validate_holds`, so the service can start on such a file.
+        let over = Config::parse(&toml(MAX_HOLD_MS + 1), Path::new(".")).unwrap();
+        assert!(over.validate_holds().is_err());
+    }
+
     #[test]
     fn implicit_setup_matches_legacy() {
         let cfg = Config::parse(include_str!("../../../examples/config.toml"), Path::new("/x")).unwrap();

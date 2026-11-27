@@ -49,6 +49,9 @@ const PRETTY: Record<string, string> = {
   sysrq: 'PrtSc', print: 'PrtSc',
 };
 
+/** The longest `keys` hold the service accepts (`MAX_HOLD_MS` in masterhub-core). */
+export const MAX_HOLD_MS = 3000;
+
 /** "ctrl+shift+t" → ["Ctrl", "Shift", "T"] (a trailing "@700" hold is dropped). */
 export function prettyKeys(combo: string): string[] {
   return combo
