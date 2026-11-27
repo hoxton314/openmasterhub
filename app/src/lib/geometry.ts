@@ -100,3 +100,43 @@ export const ROLLER_RECTS: Record<'left' | 'right', [number, number, number, num
 };
 
 export const faderX = (i: number) => 0.4 + i * 0.8;
+
+// ───────────── pixel layout of the editor canvas (HubCanvas) ─────────────
+// The canvas draws the hub as HTML at 1 cell = U px (so token sizes in the theme read 1:1),
+// then scales the whole stage to fit. Module-local positions below are in px, natural orientation.
+
+/** Pixels per cell. */
+export const U = 92;
+/** The Base's visible margin around its sockets. */
+export const BASE_MARGIN = 17;
+
+export type Box = [x: number, y: number, w: number, h: number];
+
+export const KEY_PX = 62;
+const KEY_GAP = 6;
+
+/** Key `i` (row-major, 5×3) in the keypad module. */
+export function keyBox(i: number): Box {
+  const x0 = (FOOTPRINT.keypad[0] * U - (5 * KEY_PX + 4 * KEY_GAP)) / 2;
+  return [x0 + (i % 5) * (KEY_PX + KEY_GAP), 17 + Math.floor(i / 5) * (KEY_PX + KEY_GAP), KEY_PX, KEY_PX];
+}
+
+/** The dial module: ring centre and radii. */
+export const DIAL_PX = { cx: U, cy: U, ring: 78, face: 62 };
+/** Knob centres and radius in the knob module (a row of three). */
+export const KNOB_PX = { r: 27, centers: [[33, 80], [92, 80], [151, 80]] as [number, number][] };
+/** Roller rectangles in the roller module. */
+export const ROLLER_PX: Record<'left' | 'right', Box> = { left: [20, 18, 152, 48], right: [196, 18, 152, 48] };
+/** Fader track box `i` (5 across the fader module). */
+export const faderBox = (i: number): Box => [40 + i * 72 - 20, 18, 40, 148];
+
+/** Matrix in cells → CSS `matrix()` in px. */
+export const cssMatrix = (m: Matrix) => `matrix(${m[0]}, ${m[1]}, ${m[2]}, ${m[3]}, ${m[4] * U}, ${m[5] * U})`;
+
+/** Axis-aligned bounds, in px, of a natural-px box under a cell matrix (rotations are multiples of 90°). */
+export function boundsPx(m: Matrix, [x, y, w, h]: Box): Box {
+  const pts = [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].map(([px, py]) => [m[0] * px + m[2] * py + m[4] * U, m[1] * px + m[3] * py + m[5] * U]);
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+}
