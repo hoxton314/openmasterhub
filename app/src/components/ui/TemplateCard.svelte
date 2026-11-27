@@ -16,7 +16,7 @@
 </script>
 
 <button type="button" class="tpl" class:selected aria-pressed={selected} {onclick}>
-  <div class="well">{@render preview?.()}</div>
+  <div class="well" aria-hidden="true">{@render preview?.()}</div>
   <b>{title}</b>
   {#if description}<span class="desc">{description}</span>{/if}
   {#if modules.length}<span class="chips">{#each modules as m}<Chip icon={null}>{m}</Chip>{/each}</span>{/if}

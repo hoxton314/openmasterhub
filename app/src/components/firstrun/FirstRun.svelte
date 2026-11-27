@@ -5,7 +5,8 @@
   import { onMount, untrack } from 'svelte';
   import { invoke } from '../../lib/backend';
   import { edit, hasCapability, hub, setSetup, toast } from '../../lib/hub.svelte';
-  import type { ModuleKind } from '../../lib/types';
+  import { effectiveSetups, profileByName } from '../../lib/model';
+  import type { ModuleKind, Profile } from '../../lib/types';
   import { ui } from '../../lib/ui.svelte';
   import { saveApp } from '../settings/actions';
   import Button from '../ui/Button.svelte';
@@ -14,6 +15,7 @@
   import Kbd from '../ui/Kbd.svelte';
   import ProgressSteps from '../ui/ProgressSteps.svelte';
   import TemplateCard from '../ui/TemplateCard.svelte';
+  import TemplatePreview from '../profiles/TemplatePreview.svelte';
   import { apply, build, STARTINGS, type StartingId } from './starting';
   import './trigger.svelte';
 
@@ -53,6 +55,21 @@
   const hasWarnings = $derived(checks.some((c) => c.status === 'warning' || c.status === 'danger'));
   const found = $derived(build('work', openClasses).profiles.filter((p) => p.apps?.length).map((p) => p.name));
 
+  /** The hub drawn on the modules step: the modules found, no keys yet. */
+  const found_modules = $derived<Profile>({
+    name: '',
+    page: [{ name: 'Main', key: [] }],
+    ...(hub.modules.some((m) => m.kind === 'dial') ? { dial: {} } : {}),
+    ...(hub.modules.some((m) => m.kind === 'knob') ? { knob: [{ index: 0 }] } : {}),
+    ...(hub.modules.some((m) => m.kind === 'fader') ? { fader: [{ index: 0 }] } : {}),
+    ...(hub.modules.some((m) => m.kind === 'roller') ? { roller: [{ side: 'left' as const }] } : {}),
+  });
+  /** The first profile of what was just created, for the last step. */
+  const createdProfile = $derived.by(() => {
+    const s = created ? effectiveSetups(hub.config).find((x) => x.name === created) : undefined;
+    return profileByName(hub.config, s?.profiles[0] ?? s?.fallback ?? 'Desktop') ?? profileByName(hub.config, 'Desktop');
+  });
+
   function finish() {
     saveApp({ first_run_done: true }, 'finish first run');
     ui.firstRun = false;
@@ -84,6 +101,7 @@
 </script>
 
 <div class="first" role="dialog" aria-modal="true" aria-label="Welcome to OpenMasterHUB">
+  <div class="card">
   <header>
     <ProgressSteps count={STEPS.length} current={step} labels={STEPS} />
     {#if step < 4}<Button variant="ghost" size="sm" onclick={finish}>Skip setup</Button>{/if}
@@ -115,14 +133,18 @@
       <p class="lead">
         {hub.modules.length ? 'The service reports these modules. You can move them in the editor, and the drawing follows.' : 'Plug the MasterHUB in and the modules appear here. You can also continue and connect it later.'}
       </p>
-      <div class="modules">
-        {#each hub.modules as m (m.serial)}
-          <div class="module">
-            <b>{KINDS[m.kind] ?? m.kind}</b>
-            <span class="t-small muted">{where(m)}</span>
-            {#if m.needs_replug}<Chip variant="warning">needs a replug</Chip>{/if}
-          </div>
-        {/each}
+      <div class="split">
+        {#if hub.modules.length}<div class="hubview" aria-hidden="true"><TemplatePreview profile={found_modules} unit={30} /></div>{/if}
+        <div class="modules">
+          {#each hub.modules as m (m.serial)}
+            <div class="module">
+              <Check size={14} />
+              <b>{KINDS[m.kind] ?? m.kind}</b>
+              <span class="t-small muted">{where(m)}</span>
+              {#if m.needs_replug}<Chip variant="warning">needs a replug</Chip>{/if}
+            </div>
+          {/each}
+        </div>
       </div>
       <div class="buttons">
         <Button icon={ScanSearch} onclick={identify} disabled={!hub.modules.length}>Identify modules</Button>
@@ -146,13 +168,19 @@
       <div class="done"><Check size={28} /></div>
       <h1 class="t-title" tabindex="-1" bind:this={heading}>You’re set</h1>
       <p class="lead">Changes apply to the hub as you make them.</p>
-      <p class="t-small muted">{created && created !== 'Desktop' ? `${created} is live. ` : ''}Try a key on the hub.</p>
-      <ul class="tips">
-        <li><Kbd>Ctrl</Kbd><Kbd>K</Kbd><span>finds anything</span></li>
-        <li><Kbd>Ctrl</Kbd><Kbd>Z</Kbd><span>undoes any change</span></li>
-      </ul>
+      <div class="split">
+        {#if createdProfile}<div class="hubview" aria-hidden="true"><TemplatePreview profile={createdProfile} unit={30} /></div>{/if}
+        <div class="after">
+          <p class="t-small muted">{created && created !== 'Desktop' ? `${created} is live. ` : ''}Try a key on the hub.</p>
+          <ul class="tips">
+            <li><Kbd>Ctrl</Kbd><Kbd>K</Kbd><span>finds anything</span></li>
+            <li><Kbd>Ctrl</Kbd><Kbd>Z</Kbd><span>undoes any change</span></li>
+          </ul>
+        </div>
+      </div>
       <Button variant="primary" iconRight={ArrowRight} onclick={open}>Open the editor</Button>
     {/if}
+  </div>
   </div>
 </div>
 
@@ -161,27 +189,61 @@
     position: fixed;
     inset: 0;
     z-index: 50;
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    place-items: center;
+    padding: var(--space-4);
     background: var(--color-bg);
     animation: fade-in var(--motion-panel);
+  }
+  .card {
+    width: min(840px, 100%);
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-6) 32px 28px;
+    gap: var(--space-4);
+    background: var(--color-surface);
+    border: var(--panel-border-width) solid var(--color-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-popover);
   }
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--space-4) var(--space-6);
   }
   .body {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    width: min(560px, calc(100% - 32px));
-    margin: 0 auto;
-    padding: var(--space-6) 0 var(--space-8);
     display: grid;
-    align-content: center;
+    align-content: start;
     justify-items: start;
     gap: var(--space-4);
+  }
+  .split {
+    display: flex;
+    align-items: center;
+    gap: var(--space-6);
+    width: 100%;
+  }
+  .hubview {
+    flex: none;
+    padding: var(--space-3);
+    background: var(--hub-base);
+    border-radius: var(--radius-lg);
+    pointer-events: none;
+  }
+  .split .modules,
+  .after {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: var(--space-2);
+  }
+  .module :global(svg) {
+    color: var(--color-success);
+    flex: none;
   }
   h1,
   p {
@@ -207,7 +269,7 @@
     align-items: center;
     gap: var(--space-4);
     padding: var(--space-3) var(--space-4);
-    background: var(--color-surface);
+    background: var(--color-sunken);
     border: var(--panel-border-width) solid var(--color-border);
     border-radius: var(--radius-card);
   }
@@ -237,7 +299,7 @@
     align-items: center;
     gap: var(--space-3);
     padding: var(--space-2) var(--space-4);
-    background: var(--color-surface);
+    background: var(--color-sunken);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-row);
   }

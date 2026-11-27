@@ -119,6 +119,14 @@
       <p class="empty">No profiles in this setup yet.</p>
     {/if}
   </div>
+
+  <div class="service" title={hub.online ? 'masterhubd is running' : 'masterhubd is not running'}>
+    <StatusDot status={hub.online ? 'success' : 'danger'} size={7} halo={false} label={hub.online ? 'Service running' : 'Service stopped'} />
+    {#if !collapsed}
+      <span class="t-small">{hub.online ? 'Service running' : 'Service stopped'}</span>
+      <span class="t-small faint count">{hub.modules.length} {hub.modules.length === 1 ? 'module' : 'modules'}</span>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -190,6 +198,22 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+  }
+  .service {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    align-self: stretch;
+    padding: 10px 8px 2px;
+    border-top: 1px solid var(--color-border);
+    color: var(--color-text-2);
+  }
+  .collapsed .service {
+    justify-content: center;
+  }
+  .count {
+    margin-left: auto;
   }
   .collapsed .scroll {
     align-items: center;

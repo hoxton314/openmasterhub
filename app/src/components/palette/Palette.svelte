@@ -112,7 +112,7 @@
   const results = $derived.by(() => {
     const pool = commandMode ? entries.filter((e) => e.command) : entries.filter((e) => e.group !== 'Actions' || !e.command || text.trim());
     const found = rank(text, pool, (e) => `${e.label} ${e.hint ?? ''}`);
-    return text.trim() ? found.slice(0, 40) : found.filter((e) => !e.command).slice(0, 40);
+    return text.trim() || commandMode ? found.slice(0, 40) : found.filter((e) => !e.command).slice(0, 40);
   });
   /** Results with their group header where the group changes (ranked results mix groups when searching). */
   const rows = $derived(results.map((e, i) => ({ e, header: !text.trim() && e.group !== results[i - 1]?.group ? e.group : undefined, i })));
