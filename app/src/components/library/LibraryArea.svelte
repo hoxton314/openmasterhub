@@ -1,22 +1,26 @@
 <!-- The Library area (S22): filters on the left; integrations and templates in the middle; an
   integration's plan, the Claude Code page and the live surface as sub-views. -->
 <script lang="ts">
-  import { Library as LibraryIcon } from 'lucide-svelte';
+  import { Library as LibraryIcon, Upload } from 'lucide-svelte';
   import { onMount } from 'svelte';
+  import { invoke } from '../../lib/backend';
   import { games } from '../../lib/games.svelte';
   import { currentProfile, edit, hub, profileMut, undo } from '../../lib/hub.svelte';
   import { integrationEntries, refreshIntegrations, type IntegrationEntry } from '../../lib/integrations.svelte';
-  import { applyControls, instantiate, listTemplates, moduleWarning, needsLabels, type Template } from '../../lib/templates';
+  import { applyControls, instantiate, listTemplates, moduleWarning, needsLabels, uniqueName, type Template } from '../../lib/templates';
   import type { ModuleKind, Profile } from '../../lib/types';
   import { ui } from '../../lib/ui.svelte';
+  import { insertProfile } from '../profiles/profileOps';
   import { createFromTemplate } from '../setups/ops';
   import Layout from '../shell/Layout.svelte';
   import Breadcrumb, { type Crumb } from '../ui/Breadcrumb.svelte';
+  import Button from '../ui/Button.svelte';
   import TemplatePreview from '../profiles/TemplatePreview.svelte';
   import EmptyState from '../ui/EmptyState.svelte';
   import SectionLabel from '../ui/SectionLabel.svelte';
   import TemplateCard from '../ui/TemplateCard.svelte';
   import ClaudeCodePage from './ClaudeCodePage.svelte';
+  import ControlTemplateRow from './ControlTemplateRow.svelte';
   import Filters, { anyFilter, emptyFilters, type Kind, type LibraryFilters } from './Filters.svelte';
   import IntegrationPlan from './IntegrationPlan.svelte';
   import IntegrationRow from './IntegrationRow.svelte';
@@ -57,6 +61,8 @@
     if (skip !== 'needs' && f.needs.length && !f.needs.some((n) => it.needs.includes(n))) return false;
     if (skip !== 'categories' && f.categories.length && !f.categories.includes(it.category)) return false;
     if (skip !== 'states' && f.states.length && !f.states.includes(it.installed ? 'installed' : 'available')) return false;
+    const q = f.query.trim().toLowerCase();
+    if (q && ![it.name, it.about, it.category, KIND_LABEL[it.kind]].some((t) => t.toLowerCase().includes(q))) return false;
     return true;
   }
   const shown = $derived(items.filter((i) => matches(i, filters)));
@@ -102,6 +108,28 @@
     ui.toast({ text: `Applied ${t.name} to ${target}`, kind: 'success', action: { label: 'Undo', run: () => undo() } });
   }
 
+  /** Adds the profiles of a chosen `.toml` file to the config (outside every setup), with Undo. */
+  async function importToml() {
+    try {
+      const found = await invoke<Profile[] | null>('import_toml');
+      if (!found) return;
+      if (!found.length) return ui.toast({ text: 'No profiles in that file.', kind: 'warning' });
+      edit(
+        (c) => {
+          for (const p of found) {
+            const made = JSON.parse(JSON.stringify(p)) as Profile;
+            made.name = uniqueName((c.profile ?? []).map((x) => x.name), p.name);
+            insertProfile(c, made, []);
+          }
+        },
+        { label: `Import ${found.length === 1 ? found[0].name : `${found.length} profiles`}` },
+      );
+      ui.toast({ text: found.length === 1 ? `Imported the profile ${found[0].name}` : `Imported ${found.length} profiles`, kind: 'success', action: { label: 'Undo', run: () => undo() } });
+    } catch (e) {
+      ui.toast({ text: `Could not import: ${e}`, kind: 'danger' });
+    }
+  }
+
   const crumbs = $derived.by<Crumb[]>(() => {
     const root: Crumb = { label: 'Library', icon: LibraryIcon, onclick: () => ui.go('library', null) };
     if (!route) return [root];
@@ -140,11 +168,20 @@
         </header>
         {#each sections as s (s.kind)}
           <section aria-label={TITLE[s.kind]}>
-            <SectionLabel as="h2">{TITLE[s.kind]}</SectionLabel>
-            {#if SUB[s.kind]}<p class="t-small muted sub">{SUB[s.kind]}</p>{/if}
+            <div class="head">
+              <SectionLabel as="h2">{TITLE[s.kind]}</SectionLabel>
+              {#if SUB[s.kind]}<span class="t-small muted">{SUB[s.kind]}</span>{/if}
+              {#if s.kind === 'profile'}<Button variant="ghost" size="sm" icon={Upload} onclick={importToml}>Import .toml</Button>{/if}
+            </div>
             {#if s.kind === 'integration'}
-              <div class="list">
+              <div class="cards">
                 {#each s.items as it (it.key)}<IntegrationRow entry={it.integration!} onopen={() => open(it.integration!)} />{/each}
+              </div>
+            {:else if s.kind === 'control'}
+              <div class="cards small">
+                {#each s.items as it (it.key)}
+                  <ControlTemplateRow title={it.name} module={it.needs[0]} label={it.needs.map((n) => MODULE_LABEL[n] ?? n).join(', ') || it.about} onuse={() => use(it.template!)} />
+                {/each}
               </div>
             {:else}
               <div class="grid">
@@ -184,17 +221,24 @@
     flex-direction: column;
     gap: 10px;
   }
-  .sub {
-    margin-top: -6px;
-  }
-  .list {
+  .head {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 28px;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 12px;
+  }
+  .cards.small {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   }
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 12px;
   }
 </style>

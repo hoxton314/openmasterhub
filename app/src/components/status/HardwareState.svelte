@@ -7,6 +7,7 @@
   import { ui } from '../../lib/ui.svelte';
   import Button from '../ui/Button.svelte';
   import Chip from '../ui/Chip.svelte';
+  import EmptyHub from './EmptyHub.svelte';
   import { hardwareIssue, vendorApp, type VendorApp } from './hardware';
 
   let vendor = $state<VendorApp | null>(null);
@@ -77,6 +78,7 @@
       <div class="badge"><CircleOff size={22} /></div>
       <h1 class="t-section">No modules connected</h1>
       <p>The service is running but sees no MasterHUB. Check the USB cable and that the Base has power.</p>
+      <EmptyHub />
       <p class="t-small">On Linux, the udev rule must be installed:</p>
       <pre class="t-mono">sudo cp 70-masterhub.rules /etc/udev/rules.d/</pre>
       <div class="buttons">

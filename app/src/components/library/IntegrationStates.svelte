@@ -58,4 +58,6 @@
   <CheckRow title="On" detail="Waiting for the game to be focused" status="success" statusLabel="On">
     {#snippet action()}<Button size="sm" onclick={onturnoff}>Turn off</Button>{/snippet}
   </CheckRow>
+{:else if plan && !plan.error}
+  <CheckRow title={state === 'needs_setup' ? 'Needs setup' : 'Off'} detail="Nothing is installed or changed until you approve the plan." status={state === 'needs_setup' ? 'warning' : 'off'} statusLabel={state === 'needs_setup' ? 'Needs setup' : 'Off'} />
 {/if}

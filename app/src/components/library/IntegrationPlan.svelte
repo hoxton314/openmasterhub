@@ -1,12 +1,13 @@
 <!-- A game mode's setup plan (S23, replaces GameDialog): folder, files, artwork, controls, and
   the approval. Nothing happens in the game folder until "Approve and turn on". -->
 <script lang="ts">
-  import { Check, FileDown, FolderOpen, PackagePlus } from 'lucide-svelte';
+  import { Check, FileDown, FolderOpen, ImageIcon, PackagePlus } from 'lucide-svelte';
   import { invoke, pickFolder } from '../../lib/backend';
   import { games, refreshGames } from '../../lib/games.svelte';
   import { editProfile, hub, toast } from '../../lib/hub.svelte';
   import { gameControls, gameError, gameState, integ, refreshBridge } from '../../lib/integrations.svelte';
   import { ui } from '../../lib/ui.svelte';
+  import TemplatePreview from '../profiles/TemplatePreview.svelte';
   import type { GamePlan, GameStatus, GameStep } from '../../lib/types';
   import Button from '../ui/Button.svelte';
   import Chip from '../ui/Chip.svelte';
@@ -112,20 +113,12 @@
     <div class="head">
       <h1 class="t-title">{game.title} mode</h1>
       <Chip variant={chipVariant}>{st.label}</Chip>
+      {#if artwork.length}<span class="art"><Chip variant="outline" icon={ImageIcon}>artwork from your install</Chip></span>{/if}
     </div>
     <p class="t-body muted">{game.about}</p>
   </header>
 
-  <IntegrationStates
-    state={st.state}
-    {plan}
-    error={gameError(game)}
-    onbrowse={browse}
-    onretry={retry}
-    onsetup={() => document.getElementById('approve')?.focus()}
-    onturnoff={turnOff}
-  />
-
+  <div class="cols">
   <section class="plan" aria-label="Setup plan">
     <div class="intro">
       <SectionLabel as="h2">Setup plan</SectionLabel>
@@ -187,15 +180,34 @@
     </div>
   </section>
 
-  {#if profile}
-    <section class="plan" aria-label="Profiles it provides">
-      <SectionLabel as="h2">Profiles it provides</SectionLabel>
-      <div class="line">
-        <span class="grow t-body">{profile.name} <span class="muted">· keypad and dial drawn live while the game is focused</span></span>
-        <Button size="sm" onclick={() => (editProfile(profile.name), ui.go('editor'))}>Open in editor</Button>
-      </div>
+  <aside class="side" aria-label="States and profiles">
+    <section class="col" aria-label="States">
+      <SectionLabel as="h2">States</SectionLabel>
+      <IntegrationStates
+        state={st.state}
+        {plan}
+        error={gameError(game)}
+        onbrowse={browse}
+        onretry={retry}
+        onsetup={() => document.getElementById('approve')?.focus()}
+        onturnoff={turnOff}
+      />
     </section>
-  {/if}
+    {#if profile}
+      <section class="col" aria-label="Profiles it provides">
+        <SectionLabel as="h2">Profiles it provides</SectionLabel>
+        <div class="provided">
+          <div class="thumb" aria-hidden="true"><TemplatePreview {profile} unit={9} /></div>
+          <div class="grow">
+            <div class="t-heading name">{profile.name}</div>
+            <div class="t-small muted">Keypad and dial drawn live while the game is focused</div>
+          </div>
+          <Button size="sm" onclick={() => (editProfile(profile.name), ui.go('editor'))}>Open in editor</Button>
+        </div>
+      </section>
+    {/if}
+  </aside>
+  </div>
 </div>
 
 <style>
@@ -207,15 +219,55 @@
     flex-direction: column;
     gap: 16px;
     padding: 24px;
-    max-width: 800px;
-    width: 100%;
-    margin: 0 auto;
     box-sizing: border-box;
   }
   .head {
     display: flex;
     align-items: center;
     gap: 12px;
+  }
+  .art {
+    margin-left: auto;
+  }
+  .cols {
+    display: flex;
+    align-items: flex-start;
+    gap: 28px;
+    flex-wrap: wrap;
+  }
+  .cols > .plan {
+    flex: 1 1 460px;
+    min-width: 0;
+  }
+  .side {
+    flex: 0 1 400px;
+    min-width: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .col {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .provided {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--color-surface);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-hairline);
+  }
+  .thumb {
+    flex: none;
+    max-width: 120px;
+    overflow: hidden;
+    border-radius: var(--radius-control);
+  }
+  .name {
+    color: var(--color-text-1);
   }
   h1,
   h3,

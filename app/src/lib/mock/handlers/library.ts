@@ -5,15 +5,19 @@ import type { ClaimInfo, GamePlan, GameStatus } from '../../types';
 import type { MockContext, MockHandlers } from '../mock';
 
 // URL switches for design work: `?states=cyberpunk:bridge_down,deadlock:error` forces a game's
-// state (bridge_down | error | running); `?hooks=missing` pretends no Claude hooks are installed.
+// state (bridge_down | error | running); `?hooks=missing` pretends no Claude hooks are installed;
+// `?claims=none` starts with no claims at all; `?demo=claim` adds Cyberpunk's claim (see editor.ts).
 const q = typeof location === 'undefined' ? new URLSearchParams() : new URLSearchParams(location.search);
 const forced = Object.fromEntries((q.get('states') ?? '').split(',').filter(Boolean).map((s) => s.split(':') as [string, string]));
 let hooksInstalled = q.get('hooks') !== 'missing';
+// Cyberpunk's claim (7) is only there with `?demo=claim` (the editor mock puts the game live then).
+const demoClaim = q.get('demo') === 'claim';
 let claims: ClaimInfo[] = [
   { claim: 7, name: 'Cyberpunk 2077 mode', active: true, owns: { keys: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], dial: true }, priority: 50, apps: ['steam_app_1091500'], pid: 4410, program: 'built-in' },
   { claim: 8, name: 'obs-hub-bridge', active: true, owns: { keys: [0, 1, 2, 3], leds: ['base'] }, priority: 20, apps: [], pid: 9021, program: '~/bin/obs-hub' },
   { claim: 9, name: 'my-script.py', active: false, owns: { knobs: [2] }, priority: 10, apps: [], pid: 9733, program: 'python3' },
 ];
+if (!demoClaim) claims = claims.filter((c) => c.claim !== 7);
 if (q.get('claims') === 'none') claims = [];
 
 const sessions = [

@@ -54,6 +54,13 @@ export function init({ snapshot }: MockContext) {
   if (params.has('firstrun') && snapshot.config?.app) delete snapshot.config.app.first_run_done;
 }
 
+/** Each `snapshot` request after the first is a reload ("Look again" / "I replugged it"): a replugged module is fine afterwards. */
+let snapshots = 0;
+export function onSnapshot({ snapshot }: MockContext) {
+  snapshots++;
+  if (snapshots > 1) for (const m of snapshot.modules) delete m.needs_replug;
+}
+
 function bringUp(emit: (event: string, payload: unknown) => void, snapshot: Snapshot) {
   if (!service) return;
   snapshot.online = false;
