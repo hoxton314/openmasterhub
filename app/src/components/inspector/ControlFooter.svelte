@@ -1,0 +1,27 @@
+<!-- Reset and Copy to… under a control's editors. -->
+<script lang="ts">
+  import { RotateCcw } from 'lucide-svelte';
+  import { toastUndo } from '../../lib/hub.svelte';
+  import type { ControlRef } from '../../lib/model/precedence';
+  import Button from '../ui/Button.svelte';
+  import InspectorSection from '../ui/InspectorSection.svelte';
+  import CopyTo from './CopyTo.svelte';
+  import { resetControl } from './control.svelte';
+
+  let { ctl, label, disabled = false, resetLabel }: { ctl: ControlRef; label: string; disabled?: boolean; resetLabel?: string } = $props();
+</script>
+
+<InspectorSection divider={false}>
+  <div class="row">
+    <Button size="sm" variant="danger" icon={RotateCcw} {disabled} onclick={() => { resetControl(ctl); toastUndo(`Reset ${label}`); }}>{resetLabel ?? `Reset ${label.toLowerCase()}`}</Button>
+    <CopyTo {ctl} {disabled} />
+  </div>
+</InspectorSection>
+
+<style>
+  .row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+</style>
