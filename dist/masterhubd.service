@@ -7,6 +7,8 @@ After=graphical-session.target
 ExecStart=/usr/bin/masterhubd
 Restart=on-failure
 RestartSec=2
+# Above the 5 s a stalled module request takes to time out (some distributions default to 10 s).
+TimeoutStopSec=30
 
 [Install]
 WantedBy=graphical-session.target

@@ -93,7 +93,9 @@ impl Worker {
                 Err(e) => break Err(e),
             }
         };
-        if self.shutdown.load(Ordering::Relaxed) {
+        // Not after an error: a module that stopped answering would hold up the shutdown for
+        // another request timeout (5 s each).
+        if self.shutdown.load(Ordering::Relaxed) && result.is_ok() {
             // Blank the screens. Deliberately no switch back to hardware mode: the firmware
             // would then ignore software mode until power-cycled.
             if let Some(cmd) = FeatureCommand::screen_color(kind, Rgb::default()) {
@@ -131,6 +133,10 @@ impl Worker {
             }
         }
         for cmd in cmds {
+            // Whole commands only: stopping inside an image would leave the module half-way.
+            if self.shutdown.load(Ordering::Relaxed) {
+                break;
+            }
             match cmd {
                 DeviceCmd::Image { target, jpeg } => {
                     for pkt in image_packets(target, &jpeg) {

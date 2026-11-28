@@ -175,9 +175,20 @@ fn main() -> Result<()> {
     }
 
     log::info!("shutting down");
+    // A module that stopped answering holds its worker in a request until the kernel times it
+    // out (5 s); name it, so a slow stop can be traced to a module.
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    while workers.values().any(|h| !h.is_finished()) && std::time::Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(50));
+    }
+    let slow: Vec<&str> = workers.iter().filter(|(_, h)| !h.is_finished()).map(|(s, _)| s.as_str()).collect();
+    if !slow.is_empty() {
+        log::warn!("still waiting for {} to finish a request", slow.join(", "));
+    }
     for (_, h) in workers {
         let _ = h.join();
     }
+    log::info!("stopped");
     Ok(())
 }
 
