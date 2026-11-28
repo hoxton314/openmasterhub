@@ -123,8 +123,9 @@ export function keyBox(i: number): Box {
 
 /** The dial module: ring centre and radii. */
 export const DIAL_PX = { cx: U, cy: U, ring: 78, face: 62 };
-/** Knob centres and radius in the knob module (a row of three). */
-export const KNOB_PX = { r: 27, centers: [[33, 80], [92, 80], [151, 80]] as [number, number][] };
+/** Knob centres and radius in the knob module: two below, one above, as on the module
+ *  (the same order as `KNOB_CENTERS`). */
+export const KNOB_PX = { r: 26, centers: KNOB_CENTERS.map(([x, y]) => [Math.round(x * U), Math.round(y * U)]) as [number, number][] };
 /** Roller rectangles in the roller module. */
 export const ROLLER_PX: Record<'left' | 'right', Box> = { left: [20, 18, 152, 48], right: [196, 18, 152, 48] };
 /** Fader track box `i` (5 across the fader module). */

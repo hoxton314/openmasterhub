@@ -416,7 +416,8 @@
     object-fit: cover;
     pointer-events: none;
   }
-  .dial {
+  /* .ctl: the module wrapper has the same class (`module dial`). */
+  .ctl.dial {
     border-radius: 50%;
     background: transparent;
   }
@@ -449,7 +450,7 @@
     background: repeating-conic-gradient(currentColor 0 1.3deg, transparent 1.3deg 6deg);
     mask: radial-gradient(farthest-side, transparent 80%, currentColor 81%);
   }
-  .knob {
+  .ctl.knob {
     border-radius: 50%;
     background: transparent;
     box-shadow: 0 0 0 3px var(--led, var(--hub-chassis-stroke));
@@ -480,14 +481,14 @@
     color: var(--hub-caption);
     pointer-events: none;
   }
-  .roller {
+  .ctl.roller {
     border-radius: var(--hub-roller-radius);
     background:
       repeating-linear-gradient(to bottom, transparent 0 3px, var(--hub-roller-dark) 3px 5px),
       linear-gradient(to bottom, var(--hub-roller-light), var(--hub-roller-dark));
     box-shadow: var(--hub-roller-shadow);
   }
-  .fader {
+  .ctl.fader {
     border-radius: 12px;
     background: transparent;
   }
