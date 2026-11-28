@@ -21,30 +21,77 @@ pub fn raise(pid: u32, title: Option<&str>) -> anyhow::Result<()> {
     if hyprland::running() { hyprland::raise(pid, title) } else { kde::raise(pid, title) }
 }
 
-/// Window classes of the open windows, from whichever desktop is running.
+/// How the focused window is found (`get_system_info`), if any backend applies.
 #[cfg(target_os = "linux")]
-fn window_classes() -> anyhow::Result<Vec<String>> {
-    if hyprland::running() { hyprland::window_classes() } else { kde::window_classes() }
+pub fn backend() -> Option<&'static str> {
+    if hyprland::running() {
+        return Some("hyprland");
+    }
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    desktop.split(':').any(|d| d.eq_ignore_ascii_case("kde")).then_some("kwin")
 }
 
 #[cfg(windows)]
-use self::windows::window_classes;
+pub fn backend() -> Option<&'static str> {
+    Some("win32")
+}
 
 #[cfg(not(any(target_os = "linux", windows)))]
-fn window_classes() -> anyhow::Result<Vec<String>> {
+pub fn backend() -> Option<&'static str> {
+    None
+}
+
+/// Name of a running program, for the claim list.
+#[cfg(target_os = "linux")]
+pub fn program_name(pid: u32) -> Option<String> {
+    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    Some(comm.trim().to_owned()).filter(|c| !c.is_empty())
+}
+
+#[cfg(windows)]
+pub fn program_name(pid: u32) -> Option<String> {
+    exe_name(pid)
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+pub fn program_name(_pid: u32) -> Option<String> {
+    None
+}
+
+/// Class and title of the open windows, from whichever desktop is running.
+#[cfg(target_os = "linux")]
+fn window_list() -> anyhow::Result<Vec<(String, String)>> {
+    if hyprland::running() { hyprland::window_list() } else { kde::window_list() }
+}
+
+#[cfg(windows)]
+use self::windows::window_list;
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn window_list() -> anyhow::Result<Vec<(String, String)>> {
     Ok(Vec::new())
 }
 
 /// Apps with an open window (window classes, `.exe` names on Windows), sorted, without the
 /// OpenMasterHUB app itself: suggestions for a profile's `apps`.
 pub fn open_apps() -> anyhow::Result<Vec<String>> {
-    Ok(clean(window_classes()?))
+    Ok(clean(window_list()?.into_iter().map(|(class, _)| class).collect()))
+}
+
+/// Open windows with their titles (`get_open_windows`), without the OpenMasterHUB app itself.
+/// Front to back where the desktop says so, else in its own order.
+pub fn open_windows() -> anyhow::Result<Vec<masterhub_core::ipc::WindowInfo>> {
+    let mut windows = window_list()?;
+    windows.retain(|(class, _)| !is_gui(class) && !class.is_empty());
+    Ok(windows.into_iter().map(|(class, title)| masterhub_core::ipc::WindowInfo { class, title }).collect())
+}
+
+fn is_gui(class: &str) -> bool {
+    class == masterhub_core::ipc::GUI_APP_ID || class.to_ascii_lowercase().starts_with("openmasterhub")
 }
 
 fn clean(mut classes: Vec<String>) -> Vec<String> {
-    classes.retain(|c| {
-        !c.is_empty() && c != masterhub_core::ipc::GUI_APP_ID && !c.to_ascii_lowercase().starts_with("openmasterhub")
-    });
+    classes.retain(|c| !c.is_empty() && !is_gui(c));
     classes.sort();
     classes.dedup();
     classes

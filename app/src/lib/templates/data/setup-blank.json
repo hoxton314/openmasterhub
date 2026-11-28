@@ -1,0 +1,13 @@
+{
+  "id": "setup-blank",
+  "kind": "setup",
+  "name": "Blank",
+  "about": "An empty setup: add profiles yourself",
+  "category": "Setups",
+  "needs": [],
+  "setup": {
+    "name": "New setup",
+    "mode": "follow",
+    "profiles": []
+  }
+}

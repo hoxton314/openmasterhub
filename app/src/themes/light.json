@@ -1,0 +1,49 @@
+{
+  "$schema": "./theme.schema.json",
+  "schemaVersion": 1,
+  "id": "light",
+  "name": "Light",
+  "author": "OpenMasterHUB",
+  "version": "1.0.0",
+  "description": "Paper-white panels, the same layout as Dark. The hub stays dark hardware.",
+  "appearance": "light",
+  "followsSystem": true,
+  "inherits": "dark",
+  "tokens": {
+    "color": {
+      "bg": "#F3F4F6",
+      "surface": "#FFFFFF",
+      "raised": "#FFFFFF",
+      "sunken": "#EDEEF1",
+      "border": "#E1E3E8",
+      "border2": "#C9CCD4",
+      "text1": "#15171C",
+      "text2": "#474C57",
+      "text3": "#656A75",
+      "accent": "#4B51D9",
+      "accentFill": "#4B51D9",
+      "onAccent": "#FFFFFF",
+      "focus": "#4B51D9",
+      "success": "#11784A",
+      "warning": "#965400",
+      "danger": "#C42B2B",
+      "successSoft": "#E3F4EC",
+      "warningSoft": "#FBF0DF",
+      "dangerSoft": "#FBE7E7",
+      "selection": "rgba(75,81,217,0.09)",
+      "accentSoft": "rgba(75,81,217,0.09)",
+      "canvas": "#E4E6EB",
+      "canvasDot": "#D6D9E0",
+      "overlay": "rgba(18,20,26,0.38)",
+      "claim": "#C9A80F",
+      "chip": "#EEEFF3"
+    },
+    "shadow": {
+      "popover": "0 12px 32px rgba(0,0,0,0.16), 0 0 0 1px {color.border}"
+    },
+    "style": {
+      "secondaryButton": "surface",
+      "dangerButton": "fill"
+    }
+  }
+}

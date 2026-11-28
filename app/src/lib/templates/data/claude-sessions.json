@@ -1,0 +1,137 @@
+{
+  "id": "claude-sessions",
+  "kind": "profile",
+  "name": "Claude sessions",
+  "about": "One key per open session, roller pages through",
+  "category": "Everyday",
+  "needs": [
+    "keypad",
+    "roller"
+  ],
+  "profile": {
+    "name": "Claude",
+    "apps": [
+      "claude-*"
+    ],
+    "color": "#B5634A",
+    "about": "One key per open session, roller pages through",
+    "page": [
+      {
+        "name": "Sessions",
+        "key": [
+          {
+            "index": 0,
+            "widget": {
+              "kind": "claude_session",
+              "slot": 0
+            },
+            "press": {
+              "session": 0
+            }
+          },
+          {
+            "index": 1,
+            "widget": {
+              "kind": "claude_session",
+              "slot": 1
+            },
+            "press": {
+              "session": 1
+            }
+          },
+          {
+            "index": 2,
+            "widget": {
+              "kind": "claude_session",
+              "slot": 2
+            },
+            "press": {
+              "session": 2
+            }
+          },
+          {
+            "index": 3,
+            "widget": {
+              "kind": "claude_session",
+              "slot": 3
+            },
+            "press": {
+              "session": 3
+            }
+          },
+          {
+            "index": 4,
+            "widget": {
+              "kind": "claude_session",
+              "slot": 4
+            },
+            "press": {
+              "session": 4
+            }
+          },
+          {
+            "index": 5,
+            "widget": {
+              "kind": "claude_session",
+              "slot": 5
+            },
+            "press": {
+              "session": 5
+            }
+          },
+          {
+            "index": 6,
+            "widget": {
+              "kind": "claude_session",
+              "slot": 6
+            },
+            "press": {
+              "session": 6
+            }
+          },
+          {
+            "index": 7,
+            "widget": {
+              "kind": "claude_session",
+              "slot": 7
+            },
+            "press": {
+              "session": 7
+            }
+          },
+          {
+            "index": 8,
+            "widget": {
+              "kind": "claude_session",
+              "slot": 8
+            },
+            "press": {
+              "session": 8
+            }
+          },
+          {
+            "index": 9,
+            "widget": {
+              "kind": "claude_session",
+              "slot": 9
+            },
+            "press": {
+              "session": 9
+            }
+          }
+        ]
+      }
+    ],
+    "roller": [
+      {
+        "side": "right",
+        "away": {
+          "sessions": "prev"
+        },
+        "toward": {
+          "sessions": "next"
+        }
+      }
+    ]
+  }
+}

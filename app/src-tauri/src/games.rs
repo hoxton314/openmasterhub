@@ -48,6 +48,13 @@ pub async fn games_list() -> Result<serde_json::Value, String> {
     json(&["list", "--json"])
 }
 
+/// The state of a game's bridge mod (`connected`, `disconnected`, `error`); `None` for a game
+/// without one, or when masterhub-games cannot tell.
+#[tauri::command]
+pub async fn games_bridge(game: String) -> Option<String> {
+    run(&["bridge", &game]).ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
+}
+
 /// What setting up `game` would do, from `path` or the folder found through Steam.
 #[tauri::command]
 pub async fn games_plan(game: String, path: Option<String>) -> Result<serde_json::Value, String> {

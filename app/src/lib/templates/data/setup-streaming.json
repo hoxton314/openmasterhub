@@ -1,0 +1,20 @@
+{
+  "id": "setup-streaming",
+  "kind": "setup",
+  "name": "Streaming",
+  "about": "Cycle scenes by hand; the dial shows the setup",
+  "category": "Setups",
+  "needs": [
+    "keypad"
+  ],
+  "setup": {
+    "name": "Streaming",
+    "mode": "manual",
+    "color": "#7B4FD0",
+    "profiles": [
+      "streaming"
+    ],
+    "wrap": true,
+    "show_on_dial": true
+  }
+}

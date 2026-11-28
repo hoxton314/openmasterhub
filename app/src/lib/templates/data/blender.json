@@ -1,0 +1,296 @@
+{
+  "id": "blender",
+  "kind": "profile",
+  "name": "Blender",
+  "about": "Views, shading, edit mode, render; the dial frames the view",
+  "category": "Creative",
+  "needs": [
+    "keypad",
+    "dial",
+    "knob"
+  ],
+  "profile": {
+    "name": "Blender",
+    "apps": [
+      "blender"
+    ],
+    "color": "#C26A2B",
+    "about": "Views, shading, edit mode, render; the dial frames the view",
+    "page": [
+      {
+        "name": "Views",
+        "key": [
+          {
+            "index": 0,
+            "label": "Front",
+            "press": {
+              "keys": "kp1"
+            }
+          },
+          {
+            "index": 1,
+            "label": "Right",
+            "press": {
+              "keys": "kp3"
+            }
+          },
+          {
+            "index": 2,
+            "label": "Top",
+            "press": {
+              "keys": "kp7"
+            }
+          },
+          {
+            "index": 3,
+            "label": "Camera",
+            "press": {
+              "keys": "kp0"
+            },
+            "background": "#3b2f1c",
+            "text_color": "#f5bc5c"
+          },
+          {
+            "index": 4,
+            "label": "Persp",
+            "press": {
+              "keys": "kp5"
+            }
+          },
+          {
+            "index": 5,
+            "label": "Frame all",
+            "press": {
+              "keys": "home"
+            },
+            "background": "#173430",
+            "text_color": "#7fe3c6"
+          },
+          {
+            "index": 6,
+            "label": "Frame sel.",
+            "press": {
+              "keys": "kpdot"
+            },
+            "background": "#173430",
+            "text_color": "#7fe3c6"
+          },
+          {
+            "index": 7,
+            "label": "Local",
+            "press": {
+              "keys": "kpslash"
+            }
+          },
+          {
+            "index": 9,
+            "widget": {
+              "kind": "cpu_usage"
+            }
+          },
+          {
+            "index": 10,
+            "label": "Solid",
+            "press": {
+              "keys": "z"
+            }
+          },
+          {
+            "index": 11,
+            "label": "Material",
+            "press": {
+              "keys": "z"
+            },
+            "background": "#3d2f5c",
+            "text_color": "#c8b4ff"
+          },
+          {
+            "index": 12,
+            "label": "Render",
+            "press": {
+              "keys": "f12"
+            },
+            "background": "#4a3416",
+            "text_color": "#ffc86b"
+          },
+          {
+            "index": 13,
+            "label": "Shading",
+            "press": {
+              "folder": "Shading"
+            }
+          },
+          {
+            "index": 14,
+            "label": "Modeling",
+            "press": {
+              "page": "Modeling"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Modeling",
+        "key": [
+          {
+            "index": 0,
+            "label": "Grab",
+            "press": {
+              "keys": "g"
+            }
+          },
+          {
+            "index": 1,
+            "label": "Rotate",
+            "press": {
+              "keys": "r"
+            }
+          },
+          {
+            "index": 2,
+            "label": "Scale",
+            "press": {
+              "keys": "s"
+            }
+          },
+          {
+            "index": 3,
+            "label": "Extrude",
+            "press": {
+              "keys": "e"
+            }
+          },
+          {
+            "index": 4,
+            "label": "Inset",
+            "press": {
+              "keys": "i"
+            }
+          },
+          {
+            "index": 5,
+            "label": "Bevel",
+            "press": {
+              "keys": "ctrl+b"
+            }
+          },
+          {
+            "index": 6,
+            "label": "Loop cut",
+            "press": {
+              "keys": "ctrl+r"
+            }
+          },
+          {
+            "index": 7,
+            "label": "Knife",
+            "press": {
+              "keys": "k"
+            }
+          },
+          {
+            "index": 14,
+            "label": "Views",
+            "press": {
+              "page": "Views"
+            }
+          }
+        ]
+      },
+      {
+        "name": "Render",
+        "key": [
+          {
+            "index": 0,
+            "label": "Render",
+            "press": {
+              "keys": "f12"
+            },
+            "background": "#4a3416",
+            "text_color": "#ffc86b"
+          },
+          {
+            "index": 1,
+            "label": "Anim",
+            "press": {
+              "keys": "ctrl+f12"
+            }
+          },
+          {
+            "index": 2,
+            "label": "Viewer",
+            "press": {
+              "keys": "f11"
+            }
+          },
+          {
+            "index": 14,
+            "label": "Views",
+            "press": {
+              "page": "Views"
+            }
+          }
+        ]
+      }
+    ],
+    "folder": [
+      {
+        "name": "Shading",
+        "key": [
+          {
+            "index": 0,
+            "label": "Back",
+            "press": {
+              "back": true
+            },
+            "background": "#3a3a46"
+          },
+          {
+            "index": 1,
+            "label": "Wire",
+            "press": {
+              "keys": "shift+z"
+            }
+          },
+          {
+            "index": 2,
+            "label": "Solid",
+            "press": {
+              "keys": "z"
+            }
+          },
+          {
+            "index": 3,
+            "label": "Material",
+            "press": {
+              "keys": "z"
+            },
+            "background": "#3d2f5c",
+            "text_color": "#c8b4ff"
+          },
+          {
+            "index": 4,
+            "label": "Rendered",
+            "press": {
+              "keys": "z"
+            },
+            "background": "#4a3416",
+            "text_color": "#ffc86b"
+          }
+        ]
+      }
+    ],
+    "dial": {
+      "label": "Zoom view",
+      "cw": {
+        "keys": "kpplus"
+      },
+      "ccw": {
+        "keys": "kpminus"
+      },
+      "press": {
+        "keys": "home"
+      }
+    }
+  }
+}

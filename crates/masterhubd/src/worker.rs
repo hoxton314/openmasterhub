@@ -49,9 +49,11 @@ struct Worker {
 impl Worker {
     fn run(&mut self, tx: Sender<DeviceCmd>, rx: Receiver<DeviceCmd>) -> Result<()> {
         let kind = self.dev.info.kind;
+        let mut needs_replug = false;
         if let Some(cmd) = FeatureCommand::sw_mode(kind, true)
             && self.dev.command(&cmd)?.is_empty()
         {
+            needs_replug = true;
             // Firmware quirk: hardware mode was entered earlier (e.g. by the vendor app on exit)
             // and the module refuses software mode until power-cycled.
             log::error!(
@@ -64,7 +66,7 @@ impl Worker {
         let firmware = self.dev.get_feature(kind.firmware_report()).ok().and_then(|r| parse_firmware_version(&r));
         log::info!("{} {} connected (fw {})", kind.name(), self.dev.info.serial, firmware.as_deref().unwrap_or("?"));
         self.controller
-            .send(Msg::Connected { info: self.dev.info.clone(), firmware, commands: tx })
+            .send(Msg::Connected { info: self.dev.info.clone(), firmware, commands: tx, needs_replug })
             .context("controller gone")?;
 
         let mut buf = [0u8; 64];
@@ -91,7 +93,9 @@ impl Worker {
                 Err(e) => break Err(e),
             }
         };
-        if self.shutdown.load(Ordering::Relaxed) {
+        // Not after an error: a module that stopped answering would hold up the shutdown for
+        // another request timeout (5 s each).
+        if self.shutdown.load(Ordering::Relaxed) && result.is_ok() {
             // Blank the screens. Deliberately no switch back to hardware mode: the firmware
             // would then ignore software mode until power-cycled.
             if let Some(cmd) = FeatureCommand::screen_color(kind, Rgb::default()) {
@@ -129,6 +133,10 @@ impl Worker {
             }
         }
         for cmd in cmds {
+            // Whole commands only: stopping inside an image would leave the module half-way.
+            if self.shutdown.load(Ordering::Relaxed) {
+                break;
+            }
             match cmd {
                 DeviceCmd::Image { target, jpeg } => {
                     for pkt in image_packets(target, &jpeg) {

@@ -51,12 +51,13 @@ fn foreground_exe() -> Option<String> {
     exe_name(pid)
 }
 
-/// `.exe` names of the programs with a visible top-level window.
-pub fn window_classes() -> Result<Vec<String>> {
-    let mut pids: Vec<u32> = top_level_windows().into_iter().map(|(_, pid, _)| pid).collect();
-    pids.sort_unstable();
-    pids.dedup();
-    Ok(pids.into_iter().filter_map(exe_name).collect())
+/// `.exe` name and title of the visible top-level windows, front to back.
+pub fn window_list() -> Result<Vec<(String, String)>> {
+    let mut names: std::collections::HashMap<u32, Option<String>> = std::collections::HashMap::new();
+    Ok(top_level_windows()
+        .into_iter()
+        .filter_map(|(_, pid, title)| names.entry(pid).or_insert_with(|| exe_name(pid)).clone().map(|exe| (exe, title)))
+        .collect())
 }
 
 /// File name of a process's program, e.g. `obs64.exe`.

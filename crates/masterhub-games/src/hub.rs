@@ -35,7 +35,7 @@ impl Hub {
 
     /// A claim that applies only while one of `apps` (window-class globs) is focused.
     pub fn claim_apps(&mut self, name: &str, controls: Controls, apps: Vec<String>, priority: i32) -> Result<u64> {
-        let v = self.client.call(Request::Claim { name: name.into(), controls, apps, priority })?;
+        let v = self.client.call(Request::Claim { name: name.into(), controls, apps, priority, program: Some("masterhub-games".into()) })?;
         let id = v["claim"].as_u64().ok_or_else(|| anyhow::anyhow!("no claim id in {v}"))?;
         self.claim = Some(id);
         Ok(id)

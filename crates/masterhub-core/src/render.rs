@@ -11,7 +11,7 @@ use image::imageops::FilterType;
 use image::{AnimationDecoder, DynamicImage, Rgb, RgbImage, RgbaImage};
 use masterhub_proto::Rgb as Color;
 
-use crate::config::Face;
+use crate::config::{Face, ImageFit};
 use crate::ipc::Status;
 
 /// Size of a keypad key image.
@@ -34,6 +34,9 @@ pub enum LiveData {
     /// arrow in the corner when more sessions are scrolled off that way. `checked`: finished
     /// and already looked at, drawn faded.
     Session { name: String, status: Status, color: Color, frame: u32, checked: bool, above: Option<Color>, below: Option<Color> },
+    /// A dial card on a profile or setup switch, and the dial picker: a small `caption`
+    /// ("SETUP"), the `name`, a `sub` line, inside a ring in the setup colour.
+    Card { caption: String, name: String, sub: String, ring: Color },
 }
 
 /// A decoded image or animation from a face's `image` path.
@@ -42,8 +45,14 @@ pub enum Picture {
     Animated(Vec<(RgbaImage, Duration)>),
 }
 
-/// Load a picture; GIFs with more than one frame become animations.
+/// Load a picture fitted into the screen; GIFs with more than one frame become animations.
 pub fn load_picture(path: &Path, size: u32) -> Result<Picture> {
+    load_picture_as(path, size, ImageFit::Fit)
+}
+
+/// Load a picture placed as `how` (a face's `fit`).
+pub fn load_picture_as(path: &Path, size: u32, how: ImageFit) -> Result<Picture> {
+    let fit = |img: DynamicImage, size: u32| place(img, size, how);
     let is_gif = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("gif"));
     if is_gif {
         let file = std::io::BufReader::new(std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?);
@@ -66,8 +75,16 @@ pub fn load_picture(path: &Path, size: u32) -> Result<Picture> {
     Ok(Picture::Still(fit(img, size)))
 }
 
-fn fit(img: DynamicImage, size: u32) -> RgbaImage {
-    img.resize(size, size, FilterType::Lanczos3).to_rgba8()
+/// Scale (or crop) an image for a `size`² screen.
+fn place(img: DynamicImage, size: u32, how: ImageFit) -> RgbaImage {
+    match how {
+        ImageFit::Fit => img.resize(size, size, FilterType::Lanczos3).to_rgba8(),
+        ImageFit::Fill => img.resize_to_fill(size, size, FilterType::Lanczos3).to_rgba8(),
+        ImageFit::Center => {
+            let (w, h) = (img.width().min(size), img.height().min(size));
+            img.crop_imm((img.width() - w) / 2, (img.height() - h) / 2, w, h).to_rgba8()
+        }
+    }
 }
 
 pub struct Renderer {
@@ -143,10 +160,22 @@ impl Renderer {
                     draw_arrow(&mut img, false, *c);
                 }
             }
+            Some(LiveData::Card { caption, name, sub, ring }) => {
+                img = RgbImage::from_pixel(size, size, Rgb([0, 0, 0]));
+                draw_circle(&mut img, *ring);
+                let white = Color::new(255, 255, 255);
+                self.text(&mut img, &caption.to_uppercase(), s * 0.31, s * 0.075, s * 0.6, dim(white));
+                self.two_lines(&mut img, name, s * 0.5, s * 0.15, s * 0.72, white);
+                self.text(&mut img, sub, s * 0.69, s * 0.065, s * 0.66, dim(white));
+            }
             None => {
+                let over = face.label_over_image == Some(true) && face.label.is_some();
                 if let Some(pic) = picture {
                     let (x, y) = ((size.saturating_sub(pic.width())) / 2, (size.saturating_sub(pic.height())) / 2);
-                    if face.label.is_some() {
+                    if over {
+                        blend_over(&mut img, pic, x, y, 1.0);
+                        darken_bottom(&mut img);
+                    } else if face.label.is_some() {
                         // Shrink the picture to leave room for the label underneath.
                         let small = image::imageops::resize(pic, size * 2 / 3, size * 2 / 3, FilterType::Triangle);
                         blend_over(&mut img, &small, (size - small.width()) / 2, size / 12, 1.0);
@@ -414,6 +443,28 @@ fn gauge_color(f: f32) -> Color {
 }
 
 /// A 270° ring gauge open at the bottom, anti-aliased.
+/// A full thin ring near the edge.
+fn draw_circle(img: &mut RgbImage, color: Color) {
+    let size = img.width() as f32;
+    let c = size / 2.0;
+    let outer = size * 0.48;
+    let inner = outer - (size * 0.035).max(2.0);
+    for y in 0..img.height() {
+        for x in 0..img.width() {
+            let (dx, dy) = (x as f32 + 0.5 - c, y as f32 + 0.5 - c);
+            let r = (dx * dx + dy * dy).sqrt();
+            let cov = ((r - inner + 0.5).clamp(0.0, 1.0)) * ((outer - r + 0.5).clamp(0.0, 1.0));
+            if cov <= 0.0 {
+                continue;
+            }
+            let d = img.get_pixel_mut(x, y);
+            for (ch, v) in [color.r, color.g, color.b].into_iter().enumerate() {
+                d[ch] = (v as f32 * cov + d[ch] as f32 * (1.0 - cov)) as u8;
+            }
+        }
+    }
+}
+
 fn draw_ring(img: &mut RgbImage, fraction: f32, accent: Color) {
     let size = img.width() as f32;
     let (cx, cy) = (size / 2.0, size / 2.0);
@@ -511,6 +562,24 @@ mod tests {
         };
         assert_eq!(lit(0.0), 0);
         assert!(lit(0.5) > 0 && lit(0.5) < lit(0.55) * 2);
+    }
+
+    #[test]
+    fn cards_have_a_ring_and_images_fill() {
+        let r = Renderer { font: None };
+        let red = Color::new(255, 0, 0);
+        let card = LiveData::Card { caption: "Setup".into(), name: "Stream".into(), sub: "Manual".into(), ring: red };
+        let img = r.render_rgb(&Face::default(), DIAL_SIZE, None, Some(&card));
+        assert_eq!(img.get_pixel(DIAL_SIZE / 2, 9).0, [255, 0, 0]);
+        assert_eq!(img.get_pixel(DIAL_SIZE / 2, DIAL_SIZE / 2).0, [0, 0, 0]);
+        let wide = DynamicImage::ImageRgba8(RgbaImage::from_pixel(200, 100, image::Rgba([0, 255, 0, 255])));
+        let size = |how| {
+            let p = place(wide.clone(), KEY_SIZE, how);
+            (p.width(), p.height())
+        };
+        assert_eq!(size(ImageFit::Fit), (72, 36));
+        assert_eq!(size(ImageFit::Fill), (72, 72));
+        assert_eq!(size(ImageFit::Center), (72, 72));
     }
 
     #[test]

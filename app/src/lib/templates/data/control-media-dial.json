@@ -1,0 +1,26 @@
+{
+  "id": "control-media-dial",
+  "kind": "control",
+  "name": "Media dial",
+  "about": "Turn for volume, press to play or pause",
+  "category": "Audio",
+  "needs": [
+    "dial"
+  ],
+  "controls": {
+    "dial": {
+      "widget": {
+        "kind": "now_playing"
+      },
+      "cw": {
+        "volume": "+2"
+      },
+      "ccw": {
+        "volume": "-2"
+      },
+      "press": {
+        "keys": "playpause"
+      }
+    }
+  }
+}

@@ -40,21 +40,9 @@ pub fn validate(combo: &str) -> Result<()> {
     parse_hold(combo).map(|_| ())
 }
 
-/// The longest hold accepted: the actions thread waits it out.
-const MAX_HOLD_MS: u64 = 3000;
-
-/// `combo` or `combo@ms`.
+/// `combo` or `combo@ms` (the hold limit is [`masterhub_core::config::MAX_HOLD_MS`]).
 fn parse_hold(combo: &str) -> Result<(Vec<imp::Key>, std::time::Duration)> {
-    let (keys, ms) = match combo.rsplit_once('@') {
-        Some((k, ms)) => {
-            let ms: u64 = ms.trim().parse().map_err(|_| anyhow::anyhow!("bad hold time in {combo:?}"))?;
-            if ms > MAX_HOLD_MS {
-                bail!("hold of {ms} ms in {combo:?} is over {MAX_HOLD_MS} ms");
-            }
-            (k, ms)
-        }
-        None => (combo, 0),
-    };
+    let (keys, ms) = masterhub_core::config::split_hold(combo)?;
     Ok((parse(keys)?, std::time::Duration::from_millis(ms)))
 }
 

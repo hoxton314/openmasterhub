@@ -1,0 +1,775 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/hoxton314/openmasterhub/main/app/src/themes/theme.schema.json",
+  "title": "OpenMasterHUB theme",
+  "description": "A theme for the OpenMasterHUB app. See docs/THEMES.md. Start with \"inherits\": \"dark\" and override only what you change.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "name",
+    "appearance",
+    "tokens"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{2,32}$",
+      "description": "Unique id. A user theme with a bundled id (dark, light, signal) replaces it."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "appearance": {
+      "enum": [
+        "dark",
+        "light"
+      ],
+      "description": "Sets color-scheme (scrollbars, form controls) and which follow-system slot it fits."
+    },
+    "followsSystem": {
+      "type": "boolean",
+      "default": true,
+      "description": "Offered for \"follow system\". false = opt-in only."
+    },
+    "density": {
+      "enum": [
+        "compact",
+        "comfortable"
+      ],
+      "default": "compact",
+      "description": "The density the values are written for; the density setting adjusts from there."
+    },
+    "inherits": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{2,32}$",
+      "description": "Theme id whose tokens this theme starts from (deep merge, max depth 4)."
+    },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "bg": {
+              "$ref": "#/$defs/color"
+            },
+            "surface": {
+              "$ref": "#/$defs/color"
+            },
+            "raised": {
+              "$ref": "#/$defs/color"
+            },
+            "sunken": {
+              "$ref": "#/$defs/color"
+            },
+            "border": {
+              "$ref": "#/$defs/color"
+            },
+            "border2": {
+              "$ref": "#/$defs/color"
+            },
+            "text1": {
+              "$ref": "#/$defs/color"
+            },
+            "text2": {
+              "$ref": "#/$defs/color"
+            },
+            "text3": {
+              "$ref": "#/$defs/color"
+            },
+            "accent": {
+              "$ref": "#/$defs/color"
+            },
+            "accentFill": {
+              "$ref": "#/$defs/color"
+            },
+            "onAccent": {
+              "$ref": "#/$defs/color"
+            },
+            "focus": {
+              "$ref": "#/$defs/color"
+            },
+            "success": {
+              "$ref": "#/$defs/color"
+            },
+            "warning": {
+              "$ref": "#/$defs/color"
+            },
+            "danger": {
+              "$ref": "#/$defs/color"
+            },
+            "onDanger": {
+              "$ref": "#/$defs/color"
+            },
+            "selection": {
+              "$ref": "#/$defs/color"
+            },
+            "canvas": {
+              "$ref": "#/$defs/color"
+            },
+            "canvasDot": {
+              "$ref": "#/$defs/color"
+            },
+            "overlay": {
+              "$ref": "#/$defs/color"
+            },
+            "claim": {
+              "$ref": "#/$defs/color"
+            },
+            "markerBg": {
+              "$ref": "#/$defs/color"
+            },
+            "markerFg": {
+              "$ref": "#/$defs/color"
+            },
+            "pressed": {
+              "$ref": "#/$defs/color"
+            },
+            "chip": {
+              "$ref": "#/$defs/color"
+            },
+            "rail": {
+              "$ref": "#/$defs/color"
+            },
+            "dialog": {
+              "$ref": "#/$defs/color"
+            },
+            "onAvatar": {
+              "$ref": "#/$defs/color"
+            },
+            "accentSoft": {
+              "$ref": "#/$defs/color"
+            },
+            "successSoft": {
+              "$ref": "#/$defs/color"
+            },
+            "warningSoft": {
+              "$ref": "#/$defs/color"
+            },
+            "dangerSoft": {
+              "$ref": "#/$defs/color"
+            }
+          },
+          "description": "Semantic colours. *Soft colours default to the base colour at 12% alpha."
+        },
+        "font": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ui": {
+              "$ref": "#/$defs/font"
+            },
+            "heading": {
+              "$ref": "#/$defs/font"
+            },
+            "mono": {
+              "$ref": "#/$defs/font"
+            }
+          }
+        },
+        "type": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "display": {
+              "$ref": "#/$defs/typeRole"
+            },
+            "title": {
+              "$ref": "#/$defs/typeRole"
+            },
+            "heading": {
+              "$ref": "#/$defs/typeRole"
+            },
+            "section": {
+              "$ref": "#/$defs/typeRole"
+            },
+            "body": {
+              "$ref": "#/$defs/typeRole"
+            },
+            "small": {
+              "$ref": "#/$defs/typeRole"
+            },
+            "label": {
+              "$ref": "#/$defs/typeRole"
+            },
+            "mono": {
+              "$ref": "#/$defs/typeRole"
+            },
+            "tree": {
+              "$ref": "#/$defs/typeRole"
+            },
+            "chip": {
+              "$ref": "#/$defs/typeRole"
+            },
+            "micro": {
+              "$ref": "#/$defs/typeRole"
+            }
+          }
+        },
+        "radius": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "xs": {
+              "$ref": "#/$defs/px"
+            },
+            "sm": {
+              "$ref": "#/$defs/px"
+            },
+            "md": {
+              "$ref": "#/$defs/px"
+            },
+            "lg": {
+              "$ref": "#/$defs/px"
+            },
+            "xl": {
+              "$ref": "#/$defs/px"
+            },
+            "pill": {
+              "$ref": "#/$defs/px"
+            },
+            "control": {
+              "$ref": "#/$defs/px"
+            },
+            "segment": {
+              "$ref": "#/$defs/px"
+            },
+            "kbd": {
+              "$ref": "#/$defs/px"
+            },
+            "row": {
+              "$ref": "#/$defs/px"
+            },
+            "sidebarRow": {
+              "$ref": "#/$defs/px"
+            },
+            "chip": {
+              "$ref": "#/$defs/px"
+            },
+            "avatar": {
+              "$ref": "#/$defs/px"
+            },
+            "rail": {
+              "$ref": "#/$defs/px"
+            },
+            "card": {
+              "$ref": "#/$defs/px"
+            },
+            "panel": {
+              "$ref": "#/$defs/px"
+            },
+            "toast": {
+              "$ref": "#/$defs/px"
+            },
+            "popover": {
+              "$ref": "#/$defs/px"
+            },
+            "dialog": {
+              "$ref": "#/$defs/px"
+            },
+            "well": {
+              "$ref": "#/$defs/px"
+            }
+          },
+          "description": "Corner radii in pixels."
+        },
+        "shadow": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "flat": {
+              "$ref": "#/$defs/shadow"
+            },
+            "hairline": {
+              "$ref": "#/$defs/shadow"
+            },
+            "popover": {
+              "$ref": "#/$defs/shadow"
+            },
+            "dialog": {
+              "$ref": "#/$defs/shadow"
+            },
+            "segment": {
+              "$ref": "#/$defs/shadow"
+            },
+            "kbd": {
+              "$ref": "#/$defs/shadow"
+            }
+          }
+        },
+        "focus": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "width": {
+              "$ref": "#/$defs/px"
+            },
+            "offset": {
+              "$ref": "#/$defs/px"
+            },
+            "color": {
+              "$ref": "#/$defs/color"
+            }
+          }
+        },
+        "space": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "1": {
+              "$ref": "#/$defs/px"
+            },
+            "2": {
+              "$ref": "#/$defs/px"
+            },
+            "3": {
+              "$ref": "#/$defs/px"
+            },
+            "4": {
+              "$ref": "#/$defs/px"
+            },
+            "5": {
+              "$ref": "#/$defs/px"
+            },
+            "6": {
+              "$ref": "#/$defs/px"
+            },
+            "7": {
+              "$ref": "#/$defs/px"
+            },
+            "8": {
+              "$ref": "#/$defs/px"
+            }
+          },
+          "description": "Spacing scale in pixels."
+        },
+        "size": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "rail": {
+              "$ref": "#/$defs/px"
+            },
+            "sidebar": {
+              "$ref": "#/$defs/px"
+            },
+            "sidebarCollapsed": {
+              "$ref": "#/$defs/px"
+            },
+            "inspector": {
+              "$ref": "#/$defs/px"
+            },
+            "inspectorNarrow": {
+              "$ref": "#/$defs/px"
+            },
+            "topbar": {
+              "$ref": "#/$defs/px"
+            },
+            "panelPad": {
+              "$ref": "#/$defs/px"
+            },
+            "control": {
+              "$ref": "#/$defs/px"
+            },
+            "controlSm": {
+              "$ref": "#/$defs/px"
+            },
+            "segment": {
+              "$ref": "#/$defs/px"
+            },
+            "chip": {
+              "$ref": "#/$defs/px"
+            },
+            "rowSidebar": {
+              "$ref": "#/$defs/px"
+            },
+            "rowTree": {
+              "$ref": "#/$defs/px"
+            },
+            "avatar": {
+              "$ref": "#/$defs/px"
+            },
+            "toggleWidth": {
+              "$ref": "#/$defs/px"
+            },
+            "toggleHeight": {
+              "$ref": "#/$defs/px"
+            },
+            "kbd": {
+              "$ref": "#/$defs/px"
+            },
+            "iconButton": {
+              "$ref": "#/$defs/px"
+            },
+            "dialogWidth": {
+              "$ref": "#/$defs/px"
+            },
+            "dialogBorder": {
+              "$ref": "#/$defs/px"
+            }
+          },
+          "description": "Component and panel sizes in pixels."
+        },
+        "motion": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fast": {
+              "$ref": "#/$defs/motion"
+            },
+            "panel": {
+              "$ref": "#/$defs/motion"
+            },
+            "toastIn": {
+              "$ref": "#/$defs/motion"
+            },
+            "toastOut": {
+              "$ref": "#/$defs/motion"
+            },
+            "keyFlash": {
+              "$ref": "#/$defs/motion"
+            },
+            "appliedPulse": {
+              "$ref": "#/$defs/motion"
+            }
+          }
+        },
+        "style": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "headingCase": {
+              "enum": [
+                "none",
+                "uppercase"
+              ]
+            },
+            "selectedRow": {
+              "enum": [
+                "tint",
+                "invert"
+              ]
+            },
+            "panelBorderWidth": {
+              "type": "number"
+            },
+            "buttonWeight": {
+              "type": "number"
+            },
+            "secondaryButton": {
+              "enum": [
+                "raised",
+                "surface",
+                "outline"
+              ]
+            },
+            "dangerButton": {
+              "enum": [
+                "outline",
+                "fill"
+              ]
+            },
+            "segmentSelected": {
+              "enum": [
+                "raised",
+                "fill"
+              ]
+            },
+            "toggleOff": {
+              "enum": [
+                "fill",
+                "outline"
+              ]
+            },
+            "kbd": {
+              "enum": [
+                "raised",
+                "inverse"
+              ]
+            },
+            "statusChip": {
+              "enum": [
+                "tint",
+                "outline"
+              ]
+            },
+            "activeItem": {
+              "enum": [
+                "tint",
+                "fill"
+              ]
+            },
+            "fieldBorder": {
+              "enum": [
+                "hairline",
+                "strong"
+              ]
+            }
+          }
+        },
+        "avatar": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "1": {
+              "$ref": "#/$defs/color"
+            },
+            "2": {
+              "$ref": "#/$defs/color"
+            },
+            "3": {
+              "$ref": "#/$defs/color"
+            },
+            "4": {
+              "$ref": "#/$defs/color"
+            },
+            "5": {
+              "$ref": "#/$defs/color"
+            },
+            "6": {
+              "$ref": "#/$defs/color"
+            },
+            "7": {
+              "$ref": "#/$defs/color"
+            }
+          },
+          "description": "Profile avatar palette; 7 is the fallback grey."
+        },
+        "hub": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The hub is dark hardware in every theme; bundled themes keep these equal.",
+          "properties": {
+            "base": {
+              "$ref": "#/$defs/color"
+            },
+            "baseStroke": {
+              "$ref": "#/$defs/color"
+            },
+            "chassis": {
+              "$ref": "#/$defs/color"
+            },
+            "chassisStroke": {
+              "$ref": "#/$defs/color"
+            },
+            "key": {
+              "$ref": "#/$defs/color"
+            },
+            "empty": {
+              "$ref": "#/$defs/color"
+            },
+            "socket": {
+              "$ref": "#/$defs/color"
+            },
+            "keyText": {
+              "$ref": "#/$defs/color"
+            },
+            "keyEdge": {
+              "$ref": "#/$defs/color"
+            },
+            "dialFace": {
+              "$ref": "#/$defs/color"
+            },
+            "dialCaption": {
+              "$ref": "#/$defs/color"
+            },
+            "dialRing1": {
+              "$ref": "#/$defs/color"
+            },
+            "dialRing2": {
+              "$ref": "#/$defs/color"
+            },
+            "knobLight": {
+              "$ref": "#/$defs/color"
+            },
+            "knobDark": {
+              "$ref": "#/$defs/color"
+            },
+            "knobMark": {
+              "$ref": "#/$defs/color"
+            },
+            "rollerLight": {
+              "$ref": "#/$defs/color"
+            },
+            "rollerDark": {
+              "$ref": "#/$defs/color"
+            },
+            "caption": {
+              "$ref": "#/$defs/color"
+            },
+            "brand": {
+              "$ref": "#/$defs/color"
+            },
+            "logo": {
+              "$ref": "#/$defs/color"
+            },
+            "keyFrame": {
+              "$ref": "#/$defs/shadow"
+            },
+            "previewFrame": {
+              "$ref": "#/$defs/shadow"
+            },
+            "chassisShadow": {
+              "$ref": "#/$defs/shadow"
+            },
+            "baseShadow": {
+              "$ref": "#/$defs/shadow"
+            },
+            "dialBezel": {
+              "$ref": "#/$defs/shadow"
+            },
+            "rollerShadow": {
+              "$ref": "#/$defs/shadow"
+            },
+            "keyRadius": {
+              "$ref": "#/$defs/px"
+            },
+            "chassisRadius": {
+              "$ref": "#/$defs/px"
+            },
+            "baseRadius": {
+              "$ref": "#/$defs/px"
+            },
+            "rollerRadius": {
+              "$ref": "#/$defs/px"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ref": {
+      "type": "string",
+      "pattern": "^\\{[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)+\\}$",
+      "description": "A reference to another token, e.g. {color.border}."
+    },
+    "color": {
+      "type": "string",
+      "description": "#rgb, #rrggbb, #rrggbbaa, rgb(), rgba(), hsl(), hsla(), transparent, or a {group.key} reference.",
+      "pattern": "^(#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|(rgba?|hsla?)\\([0-9.,%\\s/deg+-]+\\)|transparent|\\{[a-zA-Z0-9]+(\\.[a-zA-Z0-9]+)+\\})$"
+    },
+    "shadow": {
+      "type": "string",
+      "description": "A box-shadow: lengths, optional inset, one colour per layer, or none. May contain {group.key} references.",
+      "pattern": "^(?!.*(url\\(|var\\(|expression|@|;|\\\\|<|>)).*$"
+    },
+    "px": {
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "$ref": "#/$defs/ref"
+        }
+      ],
+      "description": "Pixels."
+    },
+    "motion": {
+      "type": "string",
+      "description": "A duration and easing, e.g. \"180ms cubic-bezier(.2,.8,.2,1)\".",
+      "pattern": "^[0-9.]+m?s(\\s+(linear|ease|ease-in|ease-out|ease-in-out|cubic-bezier\\([0-9.,\\s-]+\\)|[0-9.]+m?s))*$"
+    },
+    "font": {
+      "type": "string",
+      "description": "Comma-separated font family names (installed or bundled: Inter Variable, JetBrains Mono Variable, Archivo).",
+      "pattern": "^\\s*('[A-Za-z0-9 _-]+'|\\\"[A-Za-z0-9 _-]+\\\"|[A-Za-z][A-Za-z0-9 _-]*)(\\s*,\\s*('[A-Za-z0-9 _-]+'|\\\"[A-Za-z0-9 _-]+\\\"|[A-Za-z][A-Za-z0-9 _-]*))*\\s*$"
+    },
+    "typeRole": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "family": {
+          "enum": [
+            "ui",
+            "heading",
+            "mono"
+          ]
+        },
+        "size": {
+          "type": "number",
+          "minimum": 6,
+          "maximum": 96,
+          "description": "Pixels."
+        },
+        "lineHeight": {
+          "type": "number",
+          "description": "Unitless line height."
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 100,
+          "maximum": 1000
+        },
+        "case": {
+          "enum": [
+            "none",
+            "uppercase"
+          ]
+        },
+        "tracking": {
+          "type": "number",
+          "description": "Letter spacing in em."
+        },
+        "color": {
+          "enum": [
+            "bg",
+            "surface",
+            "raised",
+            "sunken",
+            "border",
+            "border2",
+            "text1",
+            "text2",
+            "text3",
+            "accent",
+            "accentFill",
+            "onAccent",
+            "focus",
+            "success",
+            "warning",
+            "danger",
+            "onDanger",
+            "selection",
+            "canvas",
+            "canvasDot",
+            "overlay",
+            "claim",
+            "markerBg",
+            "markerFg",
+            "pressed",
+            "chip",
+            "rail",
+            "dialog",
+            "onAvatar"
+          ],
+          "description": "A colour token name."
+        }
+      }
+    }
+  }
+}

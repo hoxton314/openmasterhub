@@ -1,0 +1,113 @@
+{
+  "id": "godot",
+  "kind": "profile",
+  "name": "Godot",
+  "about": "Run, stop, 2D/3D, script editor, debugger",
+  "category": "Creative",
+  "needs": [
+    "keypad",
+    "dial"
+  ],
+  "profile": {
+    "name": "Godot",
+    "apps": [
+      "godot",
+      "Godot*.exe"
+    ],
+    "color": "#478CBF",
+    "about": "Run, stop, 2D/3D, script editor, debugger",
+    "page": [
+      {
+        "name": "Editor",
+        "key": [
+          {
+            "index": 0,
+            "label": "Run",
+            "press": {
+              "keys": "f5"
+            },
+            "background": "#1f5a36",
+            "text_color": "#9ff0be"
+          },
+          {
+            "index": 1,
+            "label": "Run scene",
+            "press": {
+              "keys": "f6"
+            }
+          },
+          {
+            "index": 2,
+            "label": "Stop",
+            "press": {
+              "keys": "f8"
+            },
+            "background": "#8a1f1f",
+            "text_color": "#ffd0d0"
+          },
+          {
+            "index": 3,
+            "label": "2D",
+            "press": {
+              "keys": "ctrl+f1"
+            }
+          },
+          {
+            "index": 4,
+            "label": "3D",
+            "press": {
+              "keys": "ctrl+f2"
+            }
+          },
+          {
+            "index": 5,
+            "label": "Script",
+            "press": {
+              "keys": "ctrl+f3"
+            }
+          },
+          {
+            "index": 6,
+            "label": "AssetLib",
+            "press": {
+              "keys": "ctrl+f4"
+            }
+          },
+          {
+            "index": 7,
+            "label": "Find",
+            "press": {
+              "keys": "ctrl+shift+f"
+            }
+          },
+          {
+            "index": 10,
+            "label": "Debug",
+            "press": {
+              "keys": "f7"
+            }
+          },
+          {
+            "index": 11,
+            "label": "Nodes",
+            "press": {
+              "keys": "ctrl+a"
+            }
+          }
+        ]
+      }
+    ],
+    "dial": {
+      "label": "Scrub",
+      "cw": {
+        "keys": "right"
+      },
+      "ccw": {
+        "keys": "left"
+      },
+      "press": {
+        "keys": "space"
+      }
+    }
+  }
+}

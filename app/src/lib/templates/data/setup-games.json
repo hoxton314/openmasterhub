@@ -1,0 +1,17 @@
+{
+  "id": "setup-games",
+  "kind": "setup",
+  "name": "Games",
+  "about": "Follow the running game; a quiet desktop otherwise",
+  "category": "Setups",
+  "needs": [
+    "keypad"
+  ],
+  "setup": {
+    "name": "Games",
+    "mode": "follow",
+    "color": "#2F8F66",
+    "profiles": [],
+    "fallback": "desktop-media"
+  }
+}

@@ -67,6 +67,15 @@ fn main() -> Result<()> {
             let game = positional(0).context("setup needs a game name (see `masterhub-games list`)")?;
             return setup::setup(&path, &game, value("--path").map(PathBuf::from), !flag("--no-extract"));
         }
+        Some("bridge") => {
+            let game = positional(0).context("bridge needs a game name")?;
+            let info = games::by_name(&game).with_context(|| format!("unknown game {game:?}"))?;
+            // `connected`, `disconnected` (mod installed, game not running), `error` (mod folder
+            // missing), or nothing for games without a bridge mod.
+            let state = bridge::state(games::make(info, &config::Config::load(&path)?).bridge_dir.as_deref());
+            println!("{}", state.unwrap_or_default());
+            return Ok(());
+        }
         Some("disable") => return setup::disable(&path, &positional(0).context("disable needs a game name")?),
         Some("sheet") => {
             let name = positional(0).context("sheet needs a game name and a PNG path")?;
@@ -77,7 +86,7 @@ fn main() -> Result<()> {
             game::sheet(&game, &masterhub_games_render::Renderer::new()?).save(&out)?;
             return Ok(());
         }
-        Some(other) => bail!("unknown command {other:?} (list, setup, disable, sheet; --config PATH, --check)"),
+        Some(other) => bail!("unknown command {other:?} (list, plan, setup, disable, bridge, sheet; --config PATH, --check)"),
     }
     let cfg = config::Config::load(&path)?;
     if check {

@@ -21,9 +21,21 @@ anyhow = "1.0.104"
 base64 = "0.23.1"
 env_logger = "0.11.11"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif"] }
+jiff = "0.2.38"
 log = "0.4.34"
 masterhub-core = { path = "../../crates/masterhub-core" }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.154"
-tauri = { version = "2.12.3", features = [] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+tauri = { version = "2.12.3", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = "2.8.2"
+tauri-plugin-global-shortcut = "2.4.1"
+tauri-plugin-single-instance = "2.5.5"
+
+[target.'cfg(windows)'.dependencies]
+# The foreground window's size, to keep the switch overlay off fullscreen games.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The switch toast is a layer-shell surface on Wayland; libgtk-layer-shell is loaded at run time.
+gtk = "0.18"
+libloading = "0.8"

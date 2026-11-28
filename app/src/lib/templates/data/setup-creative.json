@@ -1,0 +1,19 @@
+{
+  "id": "setup-creative",
+  "kind": "setup",
+  "name": "Creative",
+  "about": "Follow the focused app: Blender and a desktop fallback",
+  "category": "Setups",
+  "needs": [
+    "keypad"
+  ],
+  "setup": {
+    "name": "Creative",
+    "mode": "follow",
+    "color": "#C26A2B",
+    "profiles": [
+      "blender"
+    ],
+    "fallback": "desktop-fallback"
+  }
+}
