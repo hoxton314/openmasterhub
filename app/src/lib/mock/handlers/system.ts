@@ -40,6 +40,7 @@ const own: MockHandlers = {
     { id: 'windows', title: 'Temperatures', detail: 'Need LibreHardwareMonitor running. SmartScreen may warn once; choose More info › Run anyway.', status: 'off', label: 'Windows only' },
   ],
   system_info: () => ({ version: '0.9.0' }),
+  mcp_program: () => 'masterhubd',
   identify: () => undefined,
   open_path: (a) => console.info('[mock] open_path', a?.path),
   backup_config: () => '/home/you/.config/openmasterhub/backups/config-2026-11-26.toml',

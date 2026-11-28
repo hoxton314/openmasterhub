@@ -19,6 +19,7 @@ masterhub-proto = { path = "../masterhub-proto" }
 nvml-wrapper = "0.13.0"
 serde = "1.0.229"
 serde_json = "1.0.154"
+toml = "1.1.8"
 
 # MPRIS (now playing) over D-Bus.
 [target.'cfg(not(windows))'.dependencies]

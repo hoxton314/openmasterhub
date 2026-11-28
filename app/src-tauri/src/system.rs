@@ -426,6 +426,18 @@ pub fn system_info(state: State<AppState>) -> Result<SystemInfo, String> {
     state.client.system_info().map_err(err)
 }
 
+/// The program an AI agent starts for the MCP server (`masterhubd mcp`, docs/MCP.md): the
+/// service next to the app (Windows installer, dev builds), else `masterhubd` from `PATH`.
+#[tauri::command]
+pub fn mcp_program() -> String {
+    let name = if cfg!(windows) { "masterhubd.exe" } else { "masterhubd" };
+    std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.join(name)))
+        .filter(|p| p.is_file())
+        .map_or_else(|| "masterhubd".to_owned(), |p| p.display().to_string())
+}
+
 // ───────────────────────────── command test ─────────────────────────────
 
 #[derive(Serialize)]

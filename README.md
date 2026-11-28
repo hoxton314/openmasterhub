@@ -135,6 +135,16 @@ screens and run config actions, while the config keeps working under them. Claim
 the focused app, and the editor shows who draws what. Protocol:
 [`docs/LIVE_SURFACE.md`](docs/LIVE_SURFACE.md).
 
+### AI agents over MCP (opt-in)
+
+Let Claude or another AI agent set up your hub for you: "make an OBS profile with scene keys
+and a mic mute on the dial" or "add a hybrid Stream setup". Turn on **Settings › AI agents ›
+Run MCP server** and connect the agent with the command shown there (`claude mcp add --scope
+user openmasterhub -- masterhubd mcp`). The agent reads the modules, the live state and every
+profile, edits profiles, pages, keys, dial, knob, fader and roller actions and setups, and
+switches or pins profiles. Every change is checked like the app's before it is saved. Tools and
+safety: [`docs/MCP.md`](docs/MCP.md).
+
 ### Game modes (opt-in)
 
 Cyberpunk 2077, Deadlock, WoW Forever and Crimson Desert get their own keys, dial readouts

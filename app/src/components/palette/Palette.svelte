@@ -1,7 +1,7 @@
 <!-- Command palette (S07), mounted by App while `ui.palette` is true (Ctrl K). Fuzzy search over
   profiles, controls, actions and settings; `>` limits it to commands. Keyboard only: ↑↓ Enter Esc. -->
 <script lang="ts">
-  import { CornerDownLeft, Globe, Keyboard, LayoutGrid, Layers, Palette as PaletteIcon, Play, Plus, Power, Redo2, Search, Settings, Undo2, Users } from 'lucide-svelte';
+  import { Bot, CornerDownLeft, Globe, Keyboard, LayoutGrid, Layers, Palette as PaletteIcon, Play, Plus, Power, Redo2, Search, Settings, Undo2, Users } from 'lucide-svelte';
   import { tick } from 'svelte';
   import { invoke } from '../../lib/backend';
   import { editor, editProfile, hasCapability, hub, redo, setProfile, setSetup, toast, undo, undoState } from '../../lib/hub.svelte';
@@ -101,6 +101,7 @@
       ['config', 'Config file', Settings],
       ['shortcuts', 'Keyboard shortcuts', Keyboard],
       ['feedback', 'Feedback', Users],
+      ['agents', 'AI agents (MCP server)', Bot],
       ['about', 'About', Settings],
     ];
     for (const [view, label, icon] of pages) out.push({ id: `settings:${view}`, group: 'Settings', label, hint: 'Settings', icon, run: go(() => ui.go('settings', { view })) });

@@ -11,6 +11,7 @@ mod focus;
 mod hid;
 mod ipc;
 mod keyboard;
+mod mcp;
 mod resume;
 mod setups;
 mod state;
@@ -48,10 +49,12 @@ fn usage() -> String {
        masterhubd ctl profile NAME|next|prev|pick
        masterhubd ctl pin [toggle|release]
                                 (tell the running service, e.g. from a compositor keybind)
+       masterhubd mcp           (MCP server for AI agents on stdio, see docs/MCP.md)
 
   --config PATH  config file (default: {DEFAULT_CONFIG})
   --check        validate the config and exit
   --list         list connected modules and exit
+  --no-modules   open no modules (try the app or `mcp` against a test config)
 
 Logging: RUST_LOG=debug masterhubd"
     )
@@ -68,16 +71,22 @@ fn main() -> Result<()> {
         masterhub_core::ipc::call_once(masterhub_core::ipc::Request::RunAction { action, value: None })?;
         return Ok(());
     }
+    if std::env::args().nth(1).as_deref() == Some("mcp") {
+        // Diagnostics go to stderr; stdout carries the protocol.
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+        return mcp::run();
+    }
     init_logging();
 
     let mut config_path = None;
-    let (mut check, mut list) = (false, false);
+    let (mut check, mut list, mut no_modules) = (false, false, false);
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--config" => config_path = Some(PathBuf::from(args.next().context("--config needs a path")?)),
             "--check" => check = true,
             "--list" => list = true,
+            "--no-modules" => no_modules = true,
             "-h" | "--help" => {
                 println!("{}", usage());
                 return Ok(());
@@ -159,7 +168,8 @@ fn main() -> Result<()> {
             resumes.fetch_add(1, Ordering::Relaxed);
         }
         workers.retain(|_, h| !h.is_finished());
-        for info in hid::enumerate() {
+        let found = if no_modules { Vec::new() } else { hid::enumerate() };
+        for info in found {
             if workers.contains_key(&info.serial) {
                 continue;
             }

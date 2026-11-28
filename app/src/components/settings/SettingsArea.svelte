@@ -1,10 +1,11 @@
 <!-- Settings area (S28): a list of sections on the left, the chosen one on the right. The section is the route (`#settings/appearance`). -->
 <script lang="ts">
-  import { Info, Keyboard, Palette, Power, FileText, Bell } from 'lucide-svelte';
+  import { Info, Keyboard, Palette, Power, FileText, Bell, Bot } from 'lucide-svelte';
   import { ui } from '../../lib/ui.svelte';
   import Layout from '../shell/Layout.svelte';
   import type { Icon } from '../ui/icon';
   import About from './About.svelte';
+  import Agents from './Agents.svelte';
   import Appearance from './Appearance.svelte';
   import ConfigFile from './ConfigFile.svelte';
   import Feedback from './Feedback.svelte';
@@ -17,6 +18,7 @@
     { id: 'config', label: 'Config file', icon: FileText },
     { id: 'shortcuts', label: 'Keyboard shortcuts', icon: Keyboard },
     { id: 'feedback', label: 'Feedback', icon: Bell },
+    { id: 'agents', label: 'AI agents', icon: Bot },
     { id: 'about', label: 'About', icon: Info },
   ];
   const current = $derived(SECTIONS.find((s) => s.id === ui.route?.view)?.id ?? 'appearance');
@@ -41,6 +43,7 @@
       {:else if current === 'config'}<ConfigFile />
       {:else if current === 'shortcuts'}<Shortcuts />
       {:else if current === 'feedback'}<Feedback />
+      {:else if current === 'agents'}<Agents />
       {:else}<About />{/if}
     </div>
   {/snippet}

@@ -2363,7 +2363,7 @@ dependencies = [
 
 [[package]]
 name = "masterhub-core"
-version = "2.0.0-beta.1"
+version = "2.0.0-beta.2"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -2381,7 +2381,7 @@ dependencies = [
 
 [[package]]
 name = "masterhub-games"
-version = "2.0.0-beta.1"
+version = "2.0.0-beta.2"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2401,7 +2401,7 @@ dependencies = [
 
 [[package]]
 name = "masterhub-games-render"
-version = "2.0.0-beta.1"
+version = "2.0.0-beta.2"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -2413,11 +2413,11 @@ dependencies = [
 
 [[package]]
 name = "masterhub-proto"
-version = "2.0.0-beta.1"
+version = "2.0.0-beta.2"
 
 [[package]]
 name = "masterhubd"
-version = "2.0.0-beta.1"
+version = "2.0.0-beta.2"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2436,6 +2436,7 @@ dependencies = [
  "pulseaudio",
  "serde",
  "serde_json",
+ "toml 1.1.8+spec-1.1.0",
  "widestring",
  "windows",
  "windows-sys 0.61.2",
@@ -2857,7 +2858,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "openmasterhub-app"
-version = "2.0.0-beta.1"
+version = "2.0.0-beta.2"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
