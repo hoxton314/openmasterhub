@@ -403,6 +403,7 @@ pub fn run() {
             system::set_service_autostart,
             system::system_checks,
             system::system_info,
+            system::mcp_program,
             system::vendor_app,
             system::close_vendor_app,
             system::run_command_test,

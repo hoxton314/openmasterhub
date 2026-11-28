@@ -105,6 +105,9 @@ pub struct AppSettings {
     /// (also follow-mode changes caused by the focused window) or `off`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overlay: Option<String>,
+    /// `masterhubd mcp` (the MCP server for AI agents) runs only when this is `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp: Option<bool>,
     /// Settings of newer app versions, kept unchanged.
     #[serde(flatten)]
     pub other: toml::Table,

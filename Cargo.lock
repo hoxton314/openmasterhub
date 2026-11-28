@@ -2436,6 +2436,7 @@ dependencies = [
  "pulseaudio",
  "serde",
  "serde_json",
+ "toml 1.1.8+spec-1.1.0",
  "widestring",
  "windows",
  "windows-sys 0.61.2",

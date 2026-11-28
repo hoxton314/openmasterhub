@@ -214,6 +214,8 @@ export interface AppSettings {
   feedback?: Feedback;
   /** Which switches get the toast: your own (default), every change, or none. */
   overlay?: 'switches' | 'all' | 'off';
+  /** `masterhubd mcp` (the MCP server for AI agents) runs only when true. */
+  mcp?: boolean;
 }
 
 export interface Config {
